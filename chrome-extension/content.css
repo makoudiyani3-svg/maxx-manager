@@ -1,0 +1,65 @@
+.maxx-sniper-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 999999;
+  padding: 12px 20px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #059669, #047857);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.4);
+  transition: transform 0.15s, box-shadow 0.15s;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.maxx-sniper-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(5, 150, 105, 0.5);
+}
+
+.maxx-sniper-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+  transform: none;
+}
+
+.maxx-sniper-toast {
+  position: fixed;
+  bottom: 80px;
+  right: 24px;
+  z-index: 999999;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+  animation: maxx-slide-in 0.3s ease;
+}
+
+.maxx-sniper-toast--success {
+  background: #059669;
+}
+
+.maxx-sniper-toast--error {
+  background: #dc2626;
+}
+
+.maxx-sniper-toast--warning {
+  background: #d97706;
+}
+
+@keyframes maxx-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Maxx Manager</title>
+    <style>
+      body {
+        width: 320px;
+        padding: 16px;
+        font-family: system-ui, -apple-system, sans-serif;
+        margin: 0;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        color: #52525b;
+        margin-bottom: 4px;
+      }
+      input {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #d4d4d8;
+        border-radius: 6px;
+        font-size: 13px;
+        box-sizing: border-box;
+        margin-bottom: 12px;
+      }
+      button {
+        width: 100%;
+        padding: 10px;
+        background: #059669;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #047857;
+      }
+      .status {
+        margin-top: 12px;
+        font-size: 12px;
+        color: #059669;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Maxx Manager Sniper</h1>
+    <label for="apiUrl">URL API</label>
+    <input type="url" id="apiUrl" placeholder="https://maxx-manager.vercel.app" />
+    <label for="apiKey">Clé API</label>
+    <input type="password" id="apiKey" placeholder="MAXX_API_KEY" />
+    <button id="save">Sauvegarder</button>
+    <div class="status" id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

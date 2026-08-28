@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Maxx Manager Sniper",
+  "version": "1.0.1",
+  "description": "Sniper des produits maxx.ca vers Maxx Manager",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "https://www.maxx.ca/*",
+    "https://maxx.ca/*",
+    "http://localhost:3000/*",
+    "https://*.vercel.app/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.maxx.ca/*", "https://maxx.ca/*"],
+      "js": ["selectors.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

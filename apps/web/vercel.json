@@ -1,0 +1,14 @@
+{
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "outputDirectory": ".next",
+  "functions": {
+    "app/api/enrich/[id]/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/publish/[id]/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
