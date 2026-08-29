@@ -24,10 +24,28 @@ const VARIANTS_BULK_CREATE = `
         id
         price
         sku
+        inventoryItem {
+          id
+        }
       }
       userErrors {
         field
         message
+      }
+    }
+  }
+`;
+
+const PRODUCT_VARIANTS = `
+  query productVariants($id: ID!) {
+    product(id: $id) {
+      variants(first: 5) {
+        nodes {
+          id
+          inventoryItem {
+            id
+          }
+        }
       }
     }
   }
@@ -157,10 +175,16 @@ async function waitForMediaReady(shopifyProductId: string, maxWaitMs = 30000): P
   throw new Error("Timed out waiting for Shopify media to be ready");
 }
 
+export interface PublishResult {
+  shopifyProductId: string;
+  shopifyVariantId: string | null;
+  shopifyInventoryItemId: string | null;
+}
+
 export async function publishProductToShopify(
   product: Product,
   images: ProductImage[]
-): Promise<string> {
+): Promise<PublishResult> {
   const client = getShopifyClient();
 
   const selectedImages = images
@@ -239,6 +263,10 @@ export async function publishProductToShopify(
 
   const variantData = await client.query<{
     productVariantsBulkCreate: {
+      productVariants: Array<{
+        id: string;
+        inventoryItem: { id: string } | null;
+      }> | null;
       userErrors: Array<{ message: string }>;
     };
   }>(VARIANTS_BULK_CREATE, {
@@ -250,6 +278,32 @@ export async function publishProductToShopify(
     throw new Error(
       variantData.productVariantsBulkCreate.userErrors.map((e) => e.message).join(", ")
     );
+  }
+
+  let shopifyVariantId =
+    variantData.productVariantsBulkCreate.productVariants?.[0]?.id ?? null;
+  let shopifyInventoryItemId =
+    variantData.productVariantsBulkCreate.productVariants?.[0]?.inventoryItem
+      ?.id ?? null;
+
+  if (!shopifyVariantId || !shopifyInventoryItemId) {
+    try {
+      const variantsData = await client.query<{
+        product: {
+          variants: {
+            nodes: Array<{ id: string; inventoryItem: { id: string } | null }>;
+          };
+        } | null;
+      }>(PRODUCT_VARIANTS, { id: shopifyProductId });
+      const first = variantsData.product?.variants.nodes.find(
+        (v) => v.inventoryItem?.id
+      );
+      shopifyVariantId = first?.id ?? shopifyVariantId;
+      shopifyInventoryItemId =
+        first?.inventoryItem?.id ?? shopifyInventoryItemId;
+    } catch (err) {
+      console.warn("Could not resolve Shopify variant ids:", err);
+    }
   }
 
   // Ensure product stays ACTIVE (some stores default draft on variant create)
@@ -305,5 +359,9 @@ export async function publishProductToShopify(
     }
   }
 
-  return shopifyProductId;
+  return {
+    shopifyProductId,
+    shopifyVariantId,
+    shopifyInventoryItemId,
+  };
 }

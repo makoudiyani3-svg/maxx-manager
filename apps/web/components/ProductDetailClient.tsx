@@ -4,6 +4,15 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Countdown } from "@/components/WarRoomHeader";
+
+const SHOPIFY_STORE_SLUG = "3efvmm-mp";
+
+function shopifyAdminUrl(gid: string): string | null {
+  const match = gid.match(/Product\/(\d+)/);
+  if (!match) return null;
+  return `https://admin.shopify.com/store/${SHOPIFY_STORE_SLUG}/products/${match[1]}`;
+}
 
 interface ProductImage {
   id: string;
@@ -51,10 +60,12 @@ interface Product {
   tags: string[];
   marketAnalysis: MarketAnalysis | null;
   shopifyProductId: string | null;
+  inventorySyncedAt?: string | null;
   errorMessage: string | null;
   images: ProductImage[];
   eventWeekKey: string | null;
   eventName: string | null;
+  auctionEndsAt?: string | null;
   lotQuantity: number;
   bidStatus: string;
   maxBidLot: string | null;
@@ -162,12 +173,62 @@ export function ProductDetailClient({ product }: { product: Product }) {
     }
   }
 
+  async function setBidStatus(status: string) {
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/products/${product.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bidStatus: status }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Échec");
+      if (data.inventorySync?.ok) {
+        setMessage(`Won — stock Shopify ×${data.inventorySync.quantity}`);
+      } else if (data.inventorySync && !data.inventorySync.ok) {
+        setMessage(`Won — stock sync échoué: ${data.inventorySync.error}`);
+      }
+      router.refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Erreur enchère");
+    }
+  }
+
+  async function syncInventory() {
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/products/${product.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ syncInventory: true, bidStatus: "won" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Échec");
+      if (data.inventorySync?.ok) {
+        setMessage(`Stock activé ×${data.inventorySync.quantity}`);
+      } else if (data.inventorySync && !data.inventorySync.ok) {
+        setMessage(`Stock: ${data.inventorySync.error}`);
+      }
+      router.refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Erreur stock");
+    }
+  }
+
   const tabs: { id: Tab; label: string }[] = [
     { id: "edit", label: "Édition" },
     { id: "preview", label: "Aperçu" },
     { id: "market", label: "Marché" },
     { id: "images", label: `Images (${selectedImages.size})` },
   ];
+
+  const adminUrl = product.shopifyProductId
+    ? shopifyAdminUrl(product.shopifyProductId)
+    : null;
+  const needsStock =
+    product.bidStatus === "won" &&
+    Boolean(product.shopifyProductId) &&
+    !product.inventorySyncedAt;
 
   return (
     <div className="fade-in space-y-6">
@@ -177,7 +238,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
             href="/"
             className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--text-faint)] transition hover:text-[var(--accent)]"
           >
-            ← Pipeline
+            ← War Room
           </Link>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">
@@ -242,11 +303,100 @@ export function ProductDetailClient({ product }: { product: Product }) {
           )}
           {product.shopifyProductId && (
             <div className="rounded-xl border border-[rgba(94,224,154,0.3)] bg-[rgba(94,224,154,0.1)] px-4 py-3 text-sm text-[var(--success)]">
-              Live sur Shopify — {product.shopifyProductId}
+              Live sur Shopify
+              {adminUrl ? (
+                <>
+                  {" — "}
+                  <a
+                    href={adminUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:no-underline"
+                  >
+                    Ouvrir dans Admin
+                  </a>
+                </>
+              ) : (
+                <> — {product.shopifyProductId}</>
+              )}
+              {product.inventorySyncedAt && (
+                <span className="ml-2 text-[var(--text-faint)]">
+                  · stock sync OK
+                </span>
+              )}
             </div>
           )}
         </div>
       )}
+
+      <div className="panel panel-glow sticky top-16 z-10 flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between lg:top-4">
+        <div className="min-w-0">
+          <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+            Décision enchère
+          </p>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <p className="font-display text-2xl font-bold text-[var(--warning)]">
+              {product.maxBidLot != null
+                ? `${Number(product.maxBidLot).toFixed(2)} $`
+                : "—"}
+              <span className="ml-2 text-xs font-medium text-[var(--text-faint)]">
+                max bid lot
+              </span>
+            </p>
+            {product.auctionEndsAt && (
+              <p className="text-sm">
+                Fin <Countdown endsAt={product.auctionEndsAt} className="font-semibold" />
+              </p>
+            )}
+            {deal?.isViable === false && (
+              <p className="text-sm text-[var(--danger)]">
+                {deal.skipReason ?? "Non viable"}
+              </p>
+            )}
+            {deal?.isViable === true && (
+              <p className="text-sm text-[var(--success)]">Deal viable</p>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {(["won", "lost", "skipped"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => void setBidStatus(s)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold capitalize ${
+                product.bidStatus === s
+                  ? s === "won"
+                    ? "bg-[var(--success)] text-[#0a0c0b]"
+                    : s === "lost"
+                      ? "bg-[var(--danger)] text-white"
+                      : "bg-[var(--text-faint)] text-[#0a0c0b]"
+                  : "border border-[var(--border)] text-[var(--text-muted)]"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+          {product.status === "ready" && !product.shopifyProductId && (
+            <button
+              onClick={handlePublish}
+              disabled={publishing}
+              className="btn btn-primary text-xs"
+            >
+              {publishing ? "…" : "Publier"}
+            </button>
+          )}
+          {needsStock && (
+            <button
+              type="button"
+              onClick={() => void syncInventory()}
+              className="rounded-full bg-[var(--warning)] px-3 py-1.5 text-xs font-bold text-[#0a0c0b]"
+            >
+              Activer stock
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
         <aside className="panel panel-glow overflow-hidden">
@@ -443,27 +593,22 @@ export function ProductDetailClient({ product }: { product: Product }) {
               )}
 
               <div className="mb-4 flex flex-wrap gap-2">
-                {(["watching", "capped", "won", "lost", "skipped"] as const).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={async () => {
-                      await fetch(`/api/products/${product.id}`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ bidStatus: s }),
-                      });
-                      router.refresh();
-                    }}
-                    className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
-                      product.bidStatus === s
-                        ? "bg-[var(--accent)] text-[#0a0c0b]"
-                        : "border border-[var(--border)] text-[var(--text-muted)]"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
+                {(["watching", "capped", "published", "won", "lost", "skipped"] as const).map(
+                  (s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => void setBidStatus(s)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
+                        product.bidStatus === s
+                          ? "bg-[var(--accent)] text-[#0a0c0b]"
+                          : "border border-[var(--border)] text-[var(--text-muted)]"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  )
+                )}
               </div>
 
               {market ? (

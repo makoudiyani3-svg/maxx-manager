@@ -53,10 +53,11 @@
   <body>
     <h1>Maxx Manager Sniper</h1>
     <label for="apiUrl">URL API</label>
-    <input type="url" id="apiUrl" placeholder="https://maxx-manager.vercel.app" />
+    <input type="url" id="apiUrl" placeholder="https://maxx-manager.vercel.app" value="https://maxx-manager.vercel.app" />
     <label for="apiKey">Clé API</label>
-    <input type="password" id="apiKey" placeholder="MAXX_API_KEY" />
+    <input type="password" id="apiKey" placeholder="MAXX_API_KEY (identique à Vercel)" />
     <button id="save">Sauvegarder</button>
+    <button type="button" id="test" style="margin-top:8px;background:#2563eb">Tester la connexion</button>
     <div class="status" id="status"></div>
     <script src="popup.js"></script>
   </body>

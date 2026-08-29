@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import "./globals.css";
@@ -22,7 +23,7 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Maxx Manager",
+  title: "Maxx Manager — War Room",
   description: "Sourcing maxx.ca → enrichissement IA → Shopify",
 };
 
@@ -37,7 +38,9 @@ export default function RootLayout({
       className={`${sora.variable} ${dmSans.variable} ${jetbrains.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <AppShell>{children}</AppShell>
+        <Suspense fallback={<div className="min-h-screen bg-[var(--bg)]" />}>
+          <AppShell>{children}</AppShell>
+        </Suspense>
       </body>
     </html>
   );

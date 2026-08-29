@@ -44,9 +44,12 @@ model Product {
   transportShare   Decimal?       @map("transport_share") @db.Decimal(10, 2)
   dealMath         Json?          @map("deal_math")
 
-  shopifyProductId String?        @map("shopify_product_id")
-  shopifyStatus    String?        @map("shopify_status")
-  errorMessage     String?        @map("error_message") @db.Text
+  shopifyProductId       String?   @map("shopify_product_id")
+  shopifyVariantId       String?   @map("shopify_variant_id")
+  shopifyInventoryItemId String?   @map("shopify_inventory_item_id")
+  shopifyStatus          String?   @map("shopify_status")
+  inventorySyncedAt      DateTime? @map("inventory_synced_at")
+  errorMessage           String?   @map("error_message") @db.Text
 
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @updatedAt @map("updated_at")

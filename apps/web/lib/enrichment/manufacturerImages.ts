@@ -14,7 +14,29 @@ const BLOCKED_IMAGE_HOSTS = [
   "www.maxx.ca",
   "cdn.maxx.ca",
   "maxxliquidation",
+  "pinterest.",
+  "pinimg.com",
+  "shutterstock",
+  "gettyimages",
+  "istockphoto",
+  "dreamstime",
+  "unsplash.com",
+  "wallpaper",
 ];
+
+/** Known brand → official product image domain */
+const BRAND_OFFICIAL_DOMAINS: Record<string, string> = {
+  ecoflow: "ecoflow.com",
+  asus: "asus.com",
+  samsung: "samsung.com",
+  lg: "lg.com",
+  dyson: "dyson.com",
+  shark: "sharkclean.com",
+  ninja: "ninjakitchen.com",
+  kitchenaid: "kitchenaid.com",
+  "wrought studio": "wayfair.com",
+  wayfair: "wayfair.com",
+};
 
 export type ProductIdentity = ParsedLotProduct;
 
@@ -150,11 +172,28 @@ async function extractImagesFromManufacturerSite(
   return [...new Set(urls)];
 }
 
+function resolveOfficialDomain(identity: ParsedLotProduct): string | null {
+  if (identity.manufacturerDomain) {
+    return identity.manufacturerDomain.replace(/^www\./, "");
+  }
+  const brandKey = identity.brand.toLowerCase();
+  if (BRAND_OFFICIAL_DOMAINS[brandKey]) {
+    return BRAND_OFFICIAL_DOMAINS[brandKey];
+  }
+  for (const [key, domain] of Object.entries(BRAND_OFFICIAL_DOMAINS)) {
+    if (brandKey.includes(key) || identity.manufacturerTitle.toLowerCase().includes(key)) {
+      return domain;
+    }
+  }
+  return null;
+}
+
 function buildSearchRounds(identity: ParsedLotProduct): string[][] {
   const title = identity.manufacturerTitle;
   const color = identity.color;
   const colorQ = color ? ` ${color}` : "";
   const attrs = (identity.attributes ?? []).slice(0, 2).join(" ");
+  const officialDomain = resolveOfficialDomain(identity);
 
   const exact = [
     ...identity.searchQueries,
@@ -162,10 +201,13 @@ function buildSearchRounds(identity: ParsedLotProduct): string[][] {
     `"${title}"${colorQ} packshot`,
     color ? `"${title}" ${color} finish` : `"${title}" official product`,
     `${identity.brand} ${identity.model}${colorQ} ${attrs}`.trim(),
-    identity.manufacturerDomain
-      ? `"${title}"${colorQ} site:${identity.manufacturerDomain}`
+    officialDomain
+      ? `site:${officialDomain} "${title}"`
       : `"${title}"${colorQ} manufacturer`,
-    `"${title}"${colorQ} -lot -auction -maxx -pallet`,
+    officialDomain
+      ? `site:${officialDomain} ${identity.model}`
+      : `"${title}"${colorQ} -lot -auction -maxx -pallet`,
+    `"${identity.brand}" "${identity.model}"${colorQ} -lot -collage`,
   ];
 
   const unique = [...new Set(exact.filter(Boolean))];
@@ -230,7 +272,7 @@ export async function findManufacturerImages(input: {
     const scored =
       boost + scoreExactProductImage(url, link, identity, resultTitle);
     // Stricter: require stronger match when color is known
-    const minScore = identity.color ? 40 : 20;
+    const minScore = identity.color ? 55 : 35;
     if (scored < minScore) return;
     const existing = collected.get(url);
     if (!existing || scored > existing.boost) {
@@ -248,6 +290,21 @@ export async function findManufacturerImages(input: {
         url,
         "manufacturer",
         scoreExactProductImage(url, "", identity) + 40
+      );
+    }
+  }
+
+  const officialDomain = resolveOfficialDomain(identity);
+  if (officialDomain && officialDomain !== identity.manufacturerDomain?.replace(/^www\./, "")) {
+    const fromOfficial = await extractImagesFromManufacturerSite(
+      officialDomain,
+      identity.manufacturerTitle
+    );
+    for (const url of fromOfficial) {
+      addUrl(
+        url,
+        "manufacturer",
+        scoreExactProductImage(url, "", identity) + 60
       );
     }
   }

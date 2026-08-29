@@ -1,40 +1,38 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { StatusBadge, STATUS_FILTERS } from "@/components/StatusBadge";
+import { STATUS_FILTERS } from "@/components/StatusBadge";
+import { WarRoomHeader } from "@/components/WarRoomHeader";
+import { ProductPipelineList } from "@/components/ProductPipelineList";
 import type { ProductStatus } from "@prisma/client";
+import { WEEKLY_TRANSPORT_CAD } from "@/lib/enrichment/pricing";
 
 export const dynamic = "force-dynamic";
 
-function formatPrice(value: unknown) {
-  if (value == null) return null;
-  const n = Number(value);
-  if (Number.isNaN(n)) return null;
-  return `${n.toFixed(2)} $`;
-}
-
-function formatDate(date: Date) {
-  return new Intl.DateTimeFormat("fr-CA", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
+const BID_FILTERS = [
+  { value: "", label: "Toutes enchères", key: "bid-all" },
+  { value: "watching", label: "Watching", key: "watching" },
+  { value: "capped", label: "Capped", key: "capped" },
+  { value: "published", label: "Publiés", key: "published" },
+  { value: "won", label: "Won", key: "won" },
+  { value: "lost", label: "Lost", key: "lost" },
+  { value: "skipped", label: "Skipped", key: "skipped" },
+];
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; event?: string }>;
+  searchParams: Promise<{ status?: string; event?: string; bid?: string }>;
 }) {
-  const { status, event } = await searchParams;
+  const { status, event, bid } = await searchParams;
   const filterStatus = status as ProductStatus | undefined;
 
   const where = {
     ...(filterStatus ? { status: filterStatus } : {}),
     ...(event ? { eventWeekKey: event } : {}),
+    ...(bid ? { bidStatus: bid } : {}),
   };
 
-  const [products, counts, total, eventGroups] = await Promise.all([
+  const [products, counts, total, eventGroups, bidCounts] = await Promise.all([
     prisma.product.findMany({
       where,
       include: {
@@ -44,7 +42,7 @@ export default async function DashboardPage({
           take: 1,
         },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ auctionEndsAt: "asc" }, { createdAt: "desc" }],
     }),
     prisma.product.groupBy({ by: ["status"], _count: true }),
     prisma.product.count(),
@@ -55,66 +53,115 @@ export default async function DashboardPage({
       orderBy: { _count: { eventWeekKey: "desc" } },
       take: 12,
     }),
+    prisma.product.groupBy({ by: ["bidStatus"], _count: true }),
   ]);
 
   const countMap = Object.fromEntries(counts.map((c) => [c.status, c._count]));
-  const readyCount = countMap.ready ?? 0;
-  const activeCount = countMap.active ?? 0;
-  const errorCount = countMap.error ?? 0;
-  const enrichingCount = countMap.enriching ?? 0;
+  const bidCountMap = Object.fromEntries(
+    bidCounts.map((c) => [c.bidStatus, c._count])
+  );
+
+  const activeEventKey =
+    event ??
+    eventGroups[0]?.eventWeekKey ??
+    products.find((p) => p.eventWeekKey)?.eventWeekKey ??
+    null;
+
+  const weekProducts = activeEventKey
+    ? await prisma.product.findMany({
+        where: { eventWeekKey: activeEventKey },
+        select: {
+          bidStatus: true,
+          maxBidLot: true,
+          lotQuantity: true,
+          auctionEndsAt: true,
+          eventName: true,
+          status: true,
+          shopifyProductId: true,
+        },
+      })
+    : products.map((p) => ({
+        bidStatus: p.bidStatus,
+        maxBidLot: p.maxBidLot,
+        lotQuantity: p.lotQuantity,
+        auctionEndsAt: p.auctionEndsAt,
+        eventName: p.eventName,
+        status: p.status,
+        shopifyProductId: p.shopifyProductId,
+      }));
+
+  const exposedStatuses = new Set(["watching", "capped", "published", "won"]);
+  const capitalExposed = weekProducts
+    .filter((p) => exposedStatuses.has(p.bidStatus) && p.maxBidLot != null)
+    .reduce((sum, p) => sum + Number(p.maxBidLot), 0);
+
+  const activeArticles = weekProducts
+    .filter((p) => !["lost", "skipped"].includes(p.bidStatus))
+    .reduce((sum, p) => sum + Math.max(1, p.lotQuantity || 1), 0);
+
+  const nearestEndsAt =
+    weekProducts
+      .map((p) => p.auctionEndsAt)
+      .filter((d): d is Date => d != null)
+      .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+
+  const eventName =
+    weekProducts.find((p) => p.eventName)?.eventName ?? activeEventKey;
+
+  const listProducts = products.map((p) => ({
+    id: p.id,
+    status: p.status,
+    bidStatus: p.bidStatus,
+    sourceUrl: p.sourceUrl,
+    shopifyProductId: p.shopifyProductId,
+    inventorySyncedAt: p.inventorySyncedAt,
+    auctionEndsAt: p.auctionEndsAt,
+    lotQuantity: p.lotQuantity,
+    title: p.title,
+    rawTitle: p.rawTitle,
+    suggestedPrice: p.suggestedPrice != null ? Number(p.suggestedPrice) : null,
+    costPrice: p.costPrice != null ? Number(p.costPrice) : null,
+    maxBidLot: p.maxBidLot != null ? Number(p.maxBidLot) : null,
+    eventWeekKey: p.eventWeekKey,
+    sourceSite: p.sourceSite,
+    createdAt: p.createdAt.toISOString(),
+    imageUrl: p.images[0]?.url ?? null,
+  }));
+
+  function hrefWith(params: Record<string, string | undefined>) {
+    const sp = new URLSearchParams();
+    const merged = {
+      status: filterStatus,
+      event,
+      bid,
+      ...params,
+    };
+    for (const [k, v] of Object.entries(merged)) {
+      if (v) sp.set(k, v);
+    }
+    const q = sp.toString();
+    return q ? `/?${q}` : "/";
+  }
 
   return (
     <div className="fade-in space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-faint)]">
-            Pipeline produits
-          </p>
-          <h1 className="font-display mt-1 text-3xl font-bold tracking-tight sm:text-4xl">
-            Catalogue Maxx
-          </h1>
-          <p className="mt-2 max-w-xl text-sm text-[var(--text-muted)]">
-            Sniper Maxx → enrichissement → prix vente concurrentiel → plafond enchère
-            (×1.30 + transport 400$/sem) → publish Shopify avant win (stock 0).
-          </p>
-        </div>
-        <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-1.5 text-xs text-[var(--text-muted)]">
-          <span className="h-2 w-2 rounded-full bg-[var(--success)] shadow-[0_0_8px_var(--success)]" />
-          Système en ligne
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          { label: "Total", value: total, hint: "produits sourcés" },
-          { label: "Prêts", value: readyCount, hint: "à publier", accent: true },
-          { label: "Actifs", value: activeCount, hint: "sur Shopify" },
-          {
-            label: enrichingCount > 0 ? "En cours" : "Erreurs",
-            value: enrichingCount > 0 ? enrichingCount : errorCount,
-            hint: enrichingCount > 0 ? "enrichissement" : "à corriger",
-            danger: enrichingCount === 0 && errorCount > 0,
-          },
-        ].map((stat) => (
-          <div key={stat.label} className="panel panel-glow p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-faint)]">
-              {stat.label}
-            </p>
-            <p
-              className={`stat-value mt-2 ${
-                stat.accent
-                  ? "text-[var(--accent)]"
-                  : stat.danger
-                    ? "text-[var(--danger)]"
-                    : ""
-              }`}
-            >
-              {stat.value}
-            </p>
-            <p className="mt-1 text-xs text-[var(--text-faint)]">{stat.hint}</p>
-          </div>
-        ))}
-      </div>
+      <WarRoomHeader
+        eventKey={activeEventKey}
+        eventName={eventName}
+        nearestEndsAt={nearestEndsAt?.toISOString() ?? null}
+        kpis={{
+          total: weekProducts.length || total,
+          ready: weekProducts.filter((p) => p.status === "ready").length,
+          published: weekProducts.filter(
+            (p) => p.bidStatus === "published" || Boolean(p.shopifyProductId)
+          ).length,
+          won: weekProducts.filter((p) => p.bidStatus === "won").length,
+          lost: weekProducts.filter((p) => p.bidStatus === "lost").length,
+          capitalExposed,
+          transportPerArticle:
+            activeArticles > 0 ? WEEKLY_TRANSPORT_CAD / activeArticles : null,
+        }}
+      />
 
       <div className="flex flex-wrap gap-2">
         {STATUS_FILTERS.map((filter) => {
@@ -122,11 +169,11 @@ export default async function DashboardPage({
             filter.value === ""
               ? total
               : (countMap[filter.value as ProductStatus] ?? 0);
-          const isActive = (filterStatus ?? "") === filter.value && !event;
+          const isActive = (filterStatus ?? "") === filter.value;
           return (
             <Link
               key={filter.key}
-              href={filter.value ? `/?status=${filter.value}` : "/"}
+              href={hrefWith({ status: filter.value || undefined })}
               className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
                 isActive
                   ? "bg-[var(--accent)] text-[#0a0c0b]"
@@ -142,6 +189,33 @@ export default async function DashboardPage({
         })}
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <span className="self-center text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">
+          Enchères
+        </span>
+        {BID_FILTERS.map((filter) => {
+          const count =
+            filter.value === ""
+              ? total
+              : (bidCountMap[filter.value] ?? 0);
+          const isActive = (bid ?? "") === filter.value;
+          return (
+            <Link
+              key={filter.key}
+              href={hrefWith({ bid: filter.value || undefined })}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                isActive
+                  ? "bg-[var(--warning)] text-[#0a0c0b]"
+                  : "border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
+              }`}
+            >
+              {filter.label}
+              <span className="ml-1 opacity-60">{count}</span>
+            </Link>
+          );
+        })}
+      </div>
+
       {eventGroups.length > 0 && (
         <div className="flex flex-wrap gap-2">
           <span className="self-center text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">
@@ -149,14 +223,14 @@ export default async function DashboardPage({
           </span>
           {eventGroups.map((g) => {
             const key = g.eventWeekKey!;
-            const isActive = event === key;
+            const isActive = event === key || (!event && key === activeEventKey);
             return (
               <Link
                 key={key}
-                href={`/?event=${encodeURIComponent(key)}`}
+                href={hrefWith({ event: key })}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                   isActive
-                    ? "bg-[var(--warning)] text-[#0a0c0b]"
+                    ? "bg-[var(--info)] text-[#0a0c0b]"
                     : "border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
                 }`}
               >
@@ -168,102 +242,7 @@ export default async function DashboardPage({
         </div>
       )}
 
-      {products.length === 0 ? (
-        <div className="panel panel-glow flex flex-col items-center px-6 py-16 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] text-2xl text-[var(--accent)]">
-            ◈
-          </div>
-          <h2 className="font-display mt-5 text-xl font-semibold">Pipeline vide</h2>
-          <p className="mt-2 max-w-sm text-sm text-[var(--text-muted)]">
-            Ouvrez l&apos;extension Chrome sur une fiche maxx.ca et cliquez{" "}
-            <span className="text-[var(--accent)]">Sniper</span> pour démarrer.
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          {products.map((product, index) => {
-            const sell = formatPrice(product.suggestedPrice);
-            const cost = formatPrice(product.costPrice);
-            const margin =
-              product.suggestedPrice && product.costPrice
-                ? Math.round(
-                    ((Number(product.suggestedPrice) - Number(product.costPrice)) /
-                      Number(product.suggestedPrice)) *
-                      100
-                  )
-                : null;
-
-            return (
-              <Link
-                key={product.id}
-                href={`/products/${product.id}`}
-                className="panel panel-glow group flex gap-4 p-3 transition hover:border-[var(--border-strong)] sm:p-4"
-                style={{ animationDelay: `${index * 40}ms` }}
-              >
-                <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-[var(--bg-elevated)] sm:h-28 sm:w-28">
-                  {product.images[0] ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={product.images[0].url}
-                      alt=""
-                      referrerPolicy="no-referrer"
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-[var(--text-faint)]">
-                      Aucune image
-                    </div>
-                  )}
-                </div>
-
-                <div className="min-w-0 flex-1 py-0.5">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <h2 className="font-display line-clamp-2 text-base font-semibold tracking-tight sm:text-lg">
-                      {product.title ?? product.rawTitle ?? "Sans titre"}
-                    </h2>
-                    <StatusBadge status={product.status} />
-                  </div>
-
-                  <p className="mt-1 truncate text-xs text-[var(--text-faint)]">
-                    {product.sourceSite} · {formatDate(product.createdAt)}
-                  </p>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                    {sell && (
-                      <span className="font-semibold text-[var(--accent)]">{sell}</span>
-                    )}
-                    {product.maxBidLot != null && (
-                      <span className="text-[var(--warning)]">
-                        Max bid {formatPrice(product.maxBidLot)}
-                      </span>
-                    )}
-                    {cost && (
-                      <span className="text-[var(--text-muted)]">Landed {cost}</span>
-                    )}
-                    {margin != null && (
-                      <span className="text-[var(--text-faint)]">Markup {margin}%</span>
-                    )}
-                    {product.bidStatus && (
-                      <span className="capitalize text-[var(--text-faint)]">
-                        {product.bidStatus}
-                      </span>
-                    )}
-                    {product.eventWeekKey && (
-                      <span className="hidden text-[var(--text-faint)] md:inline">
-                        {product.eventWeekKey.replace(/^maxx-/, "")}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="hidden items-center self-center pr-2 text-[var(--text-faint)] transition group-hover:text-[var(--accent)] sm:flex">
-                  →
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      )}
+      <ProductPipelineList products={listProducts} />
     </div>
   );
 }

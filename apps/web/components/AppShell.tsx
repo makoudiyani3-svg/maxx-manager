@@ -1,18 +1,59 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const NAV = [
-  { href: "/", label: "Pipeline", icon: "◈" },
-  { href: "/?status=ready", label: "Prêts à publier", icon: "◎" },
-  { href: "/?status=active", label: "Publiés", icon: "●" },
-  { href: "/?status=error", label: "Erreurs", icon: "!" },
+  { href: "/", label: "War Room", icon: "◈", match: "home" },
+  { href: "/?bid=watching", label: "Watching", icon: "○", match: "bid=watching" },
+  { href: "/?bid=capped", label: "Capped", icon: "◎", match: "bid=capped" },
+  { href: "/?status=ready", label: "Prêts à publier", icon: "◆", match: "status=ready" },
+  { href: "/?bid=published", label: "Publiés", icon: "●", match: "bid=published" },
+  { href: "/?bid=won", label: "Won", icon: "✓", match: "bid=won" },
+  { href: "/?bid=lost", label: "Lost", icon: "×", match: "bid=lost" },
+  { href: "/?status=error", label: "Erreurs", icon: "!", match: "status=error" },
 ];
+
+function ShopifyHealthDot() {
+  const [ok, setOk] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/shopify/health")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setOk(Boolean(data.connected));
+      })
+      .catch(() => {
+        if (!cancelled) setOk(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="flex items-center gap-2 text-[0.7rem] text-[var(--text-faint)]">
+      <span
+        className={`h-2 w-2 rounded-full ${
+          ok === null
+            ? "bg-[var(--text-faint)]"
+            : ok
+              ? "bg-[var(--success)] shadow-[0_0_8px_var(--success)]"
+              : "bg-[var(--danger)]"
+        }`}
+      />
+      Shopify {ok === null ? "…" : ok ? "OK" : "off"}
+    </div>
+  );
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const isProduct = pathname.startsWith("/products/");
+  const query = searchParams.toString();
 
   return (
     <div className="flex min-h-screen">
@@ -23,7 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Maxx<span className="text-[var(--accent)]">.</span>Manager
             </div>
             <p className="mt-0.5 text-xs text-[var(--text-faint)]">
-              Sourcing → Shopify
+              War Room · UNIT411
             </p>
           </Link>
         </div>
@@ -33,10 +74,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Navigation
           </p>
           {NAV.map((item) => {
-            const active =
-              item.href === "/"
-                ? pathname === "/" && !isProduct
-                : false;
+            let active = false;
+            if (item.match === "home") {
+              active = pathname === "/" && !isProduct && !query;
+            } else if (item.match.startsWith("bid=")) {
+              active =
+                pathname === "/" &&
+                searchParams.get("bid") === item.match.slice(4);
+            } else if (item.match.startsWith("status=")) {
+              active =
+                pathname === "/" &&
+                searchParams.get("status") === item.match.slice(7);
+            }
             return (
               <Link
                 key={item.href}
@@ -54,11 +103,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="border-t border-[var(--border)] p-4">
+        <div className="space-y-3 border-t border-[var(--border)] p-4">
+          <ShopifyHealthDot />
           <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
-            <p className="text-xs font-semibold text-[var(--text)]">Images fabricant</p>
+            <p className="text-xs font-semibold text-[var(--text)]">Ops enchères</p>
             <p className="mt-1 text-[0.7rem] leading-relaxed text-[var(--text-faint)]">
-              Les photos viennent du site officiel du fabricant, jamais de maxx.ca.
+              Publish avant win (stock 0). Marque Won → stock Shopify = qty lot.
             </p>
           </div>
         </div>
@@ -70,7 +120,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link href="/" className="font-display text-base font-bold">
               Maxx<span className="text-[var(--accent)]">.</span>Manager
             </Link>
-            <span className="text-xs text-[var(--text-faint)]">Pipeline</span>
+            <ShopifyHealthDot />
           </div>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

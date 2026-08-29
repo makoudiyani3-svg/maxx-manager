@@ -6,7 +6,11 @@ import {
   findManufacturerImages,
   MIN_PRODUCT_IMAGES,
 } from "@/lib/enrichment/manufacturerImages";
-import { verifyProductImages } from "@/lib/enrichment/imageVerify";
+import {
+  verifyProductImages,
+  findImagesFromMaxxReference,
+  type ProductImageCandidate,
+} from "@/lib/enrichment/imageVerify";
 import { parseLotToProduct } from "@/lib/enrichment/productIdentity";
 import {
   computeDealMath,
@@ -146,9 +150,28 @@ export async function enrichProduct(productId: string): Promise<void> {
     );
 
     // 2) Exact product photos (not lot photos, not maxx)
-    let rankedImages: Awaited<
-      ReturnType<typeof findManufacturerImages>
-    >["images"] = [];
+    let rankedImages: ProductImageCandidate[] = [];
+
+    const rawVariants = product.rawVariants as {
+      maxxImageRefs?: string[];
+    } | null;
+    const maxxRefs = rawVariants?.maxxImageRefs ?? [];
+
+    // Lens on Maxx lot photo → official product pages (never publish Maxx URLs)
+    if (maxxRefs.length > 0 && process.env.SERPER_API_KEY) {
+      try {
+        const fromLotLens = await findImagesFromMaxxReference(maxxRefs, identity);
+        if (fromLotLens.length > 0) {
+          rankedImages.push(...fromLotLens);
+          warnings.push(
+            `Lens sur photo Maxx → ${fromLotLens.length} image(s) fabricant trouvée(s)`
+          );
+        }
+      } catch (err) {
+        console.warn("Maxx reference lens failed:", err);
+      }
+    }
+
     try {
       const found = await findManufacturerImages({
         rawTitle: product.rawTitle ?? "Product",
@@ -157,7 +180,13 @@ export async function enrichProduct(productId: string): Promise<void> {
         minCount: MIN_PRODUCT_IMAGES,
         identity,
       });
-      rankedImages = found.images;
+      const existing = new Set(rankedImages.map((i) => i.url));
+      for (const img of found.images) {
+        if (!existing.has(img.url)) {
+          rankedImages.push(img);
+          existing.add(img.url);
+        }
+      }
     } catch (err) {
       console.warn("Manufacturer image search failed:", err);
       warnings.push("Recherche d'images fabricant échouée");

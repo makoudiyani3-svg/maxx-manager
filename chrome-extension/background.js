@@ -32,7 +32,10 @@ async function captureProduct(payload) {
     }
 
     if (!response.ok) {
-      return { success: false, error: data.error || `HTTP ${response.status}` };
+      return {
+        success: false,
+        error: data.message || data.error || `HTTP ${response.status}`,
+      };
     }
 
     return {

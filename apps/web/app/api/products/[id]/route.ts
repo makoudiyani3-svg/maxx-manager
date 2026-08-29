@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { z } from "zod";
 import { computeDealMath } from "@/lib/enrichment/pricing";
+import { setShopifyInventory } from "@/lib/shopify/setInventory";
 import type { Prisma } from "@prisma/client";
 
 const updateSchema = z.object({
@@ -13,6 +14,7 @@ const updateSchema = z.object({
   bidStatus: z
     .enum(["watching", "capped", "published", "won", "lost", "skipped"])
     .optional(),
+  syncInventory: z.boolean().optional(),
 });
 
 export async function PATCH(
@@ -53,7 +55,6 @@ export async function PATCH(
           })
         : 1;
 
-      // Prefer unit count if we can sum lot quantities
       const siblings = existing.eventWeekKey
         ? await prisma.product.findMany({
             where: {
@@ -88,7 +89,7 @@ export async function PATCH(
       };
     }
 
-    const product = await prisma.product.update({
+    let product = await prisma.product.update({
       where: { id },
       data: {
         ...(data.title !== undefined && { title: data.title }),
@@ -105,7 +106,37 @@ export async function PATCH(
       include: { images: { orderBy: { position: "asc" } } },
     });
 
-    return Response.json(product);
+    const shouldSyncInventory =
+      Boolean(product.shopifyProductId) &&
+      (data.bidStatus === "won" || data.syncInventory === true);
+
+    let inventorySync: {
+      ok: boolean;
+      quantity?: number;
+      error?: string;
+    } | null = null;
+
+    if (shouldSyncInventory) {
+      try {
+        const sync = await setShopifyInventory(product);
+        product = await prisma.product.update({
+          where: { id },
+          data: {
+            shopifyVariantId: sync.variantId,
+            shopifyInventoryItemId: sync.inventoryItemId,
+            inventorySyncedAt: new Date(),
+          },
+          include: { images: { orderBy: { position: "asc" } } },
+        });
+        inventorySync = { ok: true, quantity: sync.quantity };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("Inventory sync failed:", message);
+        inventorySync = { ok: false, error: message };
+      }
+    }
+
+    return Response.json({ ...product, inventorySync });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return Response.json(

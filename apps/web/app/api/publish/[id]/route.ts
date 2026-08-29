@@ -39,13 +39,15 @@ export async function POST(
   });
 
   try {
-    const shopifyProductId = await publishProductToShopify(product, product.images);
+    const published = await publishProductToShopify(product, product.images);
 
     await prisma.product.update({
       where: { id },
       data: {
         status: "active",
-        shopifyProductId,
+        shopifyProductId: published.shopifyProductId,
+        shopifyVariantId: published.shopifyVariantId,
+        shopifyInventoryItemId: published.shopifyInventoryItemId,
         shopifyStatus: "ACTIVE",
         bidStatus: "published",
       },
@@ -54,7 +56,7 @@ export async function POST(
     return Response.json({
       success: true,
       productId: id,
-      shopifyProductId,
+      shopifyProductId: published.shopifyProductId,
       status: "active",
     });
   } catch (error) {

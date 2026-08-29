@@ -32,8 +32,9 @@ const captureSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  if (!validateApiKey(request)) {
-    return unauthorizedResponse();
+  const auth = validateApiKey(request);
+  if (!auth.ok) {
+    return unauthorizedResponse(auth.reason);
   }
 
   try {

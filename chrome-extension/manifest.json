@@ -8,6 +8,7 @@
     "https://www.maxx.ca/*",
     "https://maxx.ca/*",
     "http://localhost:3000/*",
+    "https://maxx-manager.vercel.app/*",
     "https://*.vercel.app/*"
   ],
   "action": {

@@ -253,14 +253,34 @@ async function chatViaAnthropic(
 }
 
 /**
- * Ordre: OpenRouter → Gemini (backup simple) → Anthropic (optionnel).
+ * Ordre: pour vision (imageRanking + pixels) → Gemini d'abord.
+ * Sinon: OpenRouter → Gemini → Anthropic.
  */
+function messagesHaveImages(messages: ChatMessage[]): boolean {
+  return messages.some(
+    (m) =>
+      Array.isArray(m.content) &&
+      m.content.some((p) => p.type === "image_url")
+  );
+}
+
 export async function chatCompletion(
   task: AiTask,
   messages: ChatMessage[],
   options?: { json?: boolean; temperature?: number }
 ): Promise<string> {
   const errors: string[] = [];
+  const needsVision = task === "imageRanking" && messagesHaveImages(messages);
+
+  if (needsVision && process.env.GEMINI_API_KEY) {
+    try {
+      return await chatViaGemini(messages, options);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("Gemini vision failed:", msg);
+      errors.push(`Gemini: ${msg}`);
+    }
+  }
 
   if (process.env.OPENROUTER_API_KEY) {
     try {
