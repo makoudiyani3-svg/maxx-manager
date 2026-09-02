@@ -16,6 +16,8 @@ const updateSchema = z.object({
   descriptionHtml: z.string().optional(),
   suggestedPrice: z.number().optional(),
   tags: z.array(z.string()).optional(),
+  seoTitle: z.string().max(120).nullable().optional(),
+  seoDescription: z.string().max(320).nullable().optional(),
   selectedImageIds: z.array(z.string().uuid()).optional(),
   bidStatus: z
     .enum(["watching", "capped", "published", "won", "lost", "skipped"])
@@ -26,6 +28,7 @@ const updateSchema = z.object({
   actualCostLot: z.number().min(0).nullable().optional(),
   lowStockThreshold: z.number().int().min(0).optional(),
   syncShopifyContent: z.boolean().optional(),
+  shopifyStatus: z.enum(["ACTIVE", "DRAFT"]).optional(),
 });
 
 export async function PATCH(
@@ -128,6 +131,10 @@ export async function PATCH(
           suggestedPrice: data.suggestedPrice,
         }),
         ...(data.tags !== undefined && { tags: data.tags }),
+        ...(data.seoTitle !== undefined && { seoTitle: data.seoTitle }),
+        ...(data.seoDescription !== undefined && {
+          seoDescription: data.seoDescription,
+        }),
         ...(data.bidStatus !== undefined && { bidStatus: data.bidStatus }),
         ...(data.assignedTo !== undefined && { assignedTo: data.assignedTo }),
         ...(data.internalNotes !== undefined && {
@@ -210,13 +217,21 @@ export async function PATCH(
     }
 
     let shopifyContentSync: { ok: boolean; error?: string } | null = null;
-    if (data.syncShopifyContent && product.shopifyProductId) {
+    if (
+      (data.syncShopifyContent || data.shopifyStatus) &&
+      product.shopifyProductId
+    ) {
       try {
         await updateShopifyProductContent(product, {
-          title: product.title ?? undefined,
-          descriptionHtml: product.descriptionHtml ?? undefined,
+          ...(data.syncShopifyContent
+            ? {
+                title: product.title ?? undefined,
+                syncListingMeta: true,
+              }
+            : {}),
+          ...(data.shopifyStatus ? { status: data.shopifyStatus } : {}),
         });
-        if (product.suggestedPrice != null) {
+        if (data.syncShopifyContent && product.suggestedPrice != null) {
           await updateShopifyVariantPrice(
             product,
             Number(product.suggestedPrice)

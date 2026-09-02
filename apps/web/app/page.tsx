@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { STATUS_FILTERS } from "@/components/StatusBadge";
 import { WarRoomHeader } from "@/components/WarRoomHeader";
 import { ProductPipelineList } from "@/components/ProductPipelineList";
+import { InventoryAlertsPanel } from "@/components/InventoryAlertsPanel";
 import type { ProductStatus } from "@prisma/client";
 import { WEEKLY_TRANSPORT_CAD } from "@/lib/enrichment/pricing";
 
@@ -21,10 +22,19 @@ const BID_FILTERS = [
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; event?: string; bid?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    event?: string;
+    bid?: string;
+    alert?: string;
+  }>;
 }) {
-  const { status, event, bid } = await searchParams;
+  const { status, event, bid, alert } = await searchParams;
   const filterStatus = status as ProductStatus | undefined;
+  const alertFocus =
+    alert === "low" || alert === "unassigned" || alert === "oversold"
+      ? alert
+      : null;
 
   const where = {
     ...(filterStatus ? { status: filterStatus } : {}),
@@ -55,7 +65,6 @@ export default async function DashboardPage({
         take: 12,
       }),
       prisma.product.groupBy({ by: ["bidStatus"], _count: true }),
-      // Global inventory KPIs (includes Shopify imports with no Maxx event)
       prisma.product.findMany({
         select: {
           stockQty: true,
@@ -125,7 +134,7 @@ export default async function DashboardPage({
   const eventName =
     weekProducts.find((p) => p.eventName)?.eventName ?? activeEventKey;
 
-  const listProducts = products.map((p) => ({
+  let listProducts = products.map((p) => ({
     id: p.id,
     status: p.status,
     bidStatus: p.bidStatus,
@@ -148,12 +157,26 @@ export default async function DashboardPage({
     assignedTo: p.assignedTo,
   }));
 
+  if (alertFocus === "low") {
+    listProducts = listProducts.filter(
+      (p) =>
+        !["lost", "skipped"].includes(p.bidStatus) &&
+        (p.stockQty ?? 0) <= (p.lowStockThreshold ?? 1) &&
+        ["ready", "active", "publishing", "error"].includes(p.status)
+    );
+  } else if (alertFocus === "unassigned") {
+    listProducts = listProducts.filter(
+      (p) => !p.assignedTo && (p.status === "ready" || p.status === "active")
+    );
+  }
+
   function hrefWith(params: Record<string, string | undefined>) {
     const sp = new URLSearchParams();
     const merged = {
       status: filterStatus,
       event,
       bid,
+      alert: alertFocus ?? undefined,
       ...params,
     };
     for (const [k, v] of Object.entries(merged)) {
@@ -169,6 +192,7 @@ export default async function DashboardPage({
         eventKey={activeEventKey}
         eventName={eventName}
         nearestEndsAt={nearestEndsAt?.toISOString() ?? null}
+        activeAlert={alertFocus}
         kpis={{
           total: weekProducts.length || total,
           ready: weekProducts.filter((p) => p.status === "ready").length,
@@ -195,6 +219,8 @@ export default async function DashboardPage({
         }}
       />
 
+      <InventoryAlertsPanel focus={alertFocus} />
+
       <div className="flex flex-wrap gap-2">
         {STATUS_FILTERS.map((filter) => {
           const count =
@@ -205,7 +231,10 @@ export default async function DashboardPage({
           return (
             <Link
               key={filter.key}
-              href={hrefWith({ status: filter.value || undefined })}
+              href={hrefWith({
+                status: filter.value || undefined,
+                alert: undefined,
+              })}
               className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
                 isActive
                   ? "bg-[var(--accent)] text-[#0a0c0b]"
@@ -227,14 +256,15 @@ export default async function DashboardPage({
         </span>
         {BID_FILTERS.map((filter) => {
           const count =
-            filter.value === ""
-              ? total
-              : (bidCountMap[filter.value] ?? 0);
+            filter.value === "" ? total : (bidCountMap[filter.value] ?? 0);
           const isActive = (bid ?? "") === filter.value;
           return (
             <Link
               key={filter.key}
-              href={hrefWith({ bid: filter.value || undefined })}
+              href={hrefWith({
+                bid: filter.value || undefined,
+                alert: undefined,
+              })}
               className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                 isActive
                   ? "bg-[var(--warning)] text-[#0a0c0b]"

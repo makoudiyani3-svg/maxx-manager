@@ -201,8 +201,14 @@ function extractEventMeta() {
 
   // Try auction end from page text
   let auctionEndsAt = undefined;
-  const endEl = document.querySelector(
-    "[class*='end'], [class*='closes'], [data-end], .auction-end, .lot-ends"
+  const endEl = queryFirst(
+    MAXX_SELECTORS.auctionEnd || [
+      "[class*='end']",
+      "[class*='closes']",
+      "[data-end]",
+      ".auction-end",
+      ".lot-ends",
+    ]
   );
   const endText = endEl?.textContent || "";
   const dateGuess = endText.match(
@@ -224,7 +230,14 @@ function extractProductData() {
   const extras = [];
   document
     .querySelectorAll(
-      ".notes, .item-condition, .condition, [class*='color'], [class*='finish'], .specifications, .details"
+      [
+        ...(MAXX_SELECTORS.condition || []),
+        ".notes",
+        "[class*='color']",
+        "[class*='finish']",
+        ".specifications",
+        ".details",
+      ].join(", ")
     )
     .forEach((el) => {
       const t = el.textContent?.trim();

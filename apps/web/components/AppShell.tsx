@@ -12,21 +12,32 @@ const NAV = [
   { href: "/?bid=published", label: "Publiés", icon: "●", match: "bid=published" },
   { href: "/?bid=won", label: "Won", icon: "✓", match: "bid=won" },
   { href: "/?bid=lost", label: "Lost", icon: "×", match: "bid=lost" },
+  { href: "/?alert=low", label: "Alertes stock", icon: "⚠", match: "alert=low" },
   { href: "/?status=error", label: "Erreurs", icon: "!", match: "status=error" },
 ];
 
 function ShopifyHealthDot() {
-  const [ok, setOk] = useState<boolean | null>(null);
+  const [info, setInfo] = useState<{
+    ok: boolean | null;
+    name?: string;
+    domain?: string;
+  }>({ ok: null });
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/shopify/health")
       .then((r) => r.json())
       .then((data) => {
-        if (!cancelled) setOk(Boolean(data.connected));
+        if (!cancelled) {
+          setInfo({
+            ok: Boolean(data.connected),
+            name: data.shopName,
+            domain: data.myshopifyDomain,
+          });
+        }
       })
       .catch(() => {
-        if (!cancelled) setOk(false);
+        if (!cancelled) setInfo({ ok: false });
       });
     return () => {
       cancelled = true;
@@ -34,17 +45,25 @@ function ShopifyHealthDot() {
   }, []);
 
   return (
-    <div className="flex items-center gap-2 text-[0.7rem] text-[var(--text-faint)]">
-      <span
-        className={`h-2 w-2 rounded-full ${
-          ok === null
-            ? "bg-[var(--text-faint)]"
-            : ok
-              ? "bg-[var(--success)] shadow-[0_0_8px_var(--success)]"
-              : "bg-[var(--danger)]"
-        }`}
-      />
-      Shopify {ok === null ? "…" : ok ? "OK" : "off"}
+    <div className="space-y-1 text-[0.7rem] text-[var(--text-faint)]">
+      <div className="flex items-center gap-2">
+        <span
+          className={`h-2 w-2 rounded-full ${
+            info.ok === null
+              ? "bg-[var(--text-faint)]"
+              : info.ok
+                ? "bg-[var(--success)] shadow-[0_0_8px_var(--success)]"
+                : "bg-[var(--danger)]"
+          }`}
+        />
+        Shopify {info.ok === null ? "…" : info.ok ? "OK" : "off"}
+      </div>
+      {info.ok && info.name && (
+        <p className="truncate pl-4 text-[0.65rem] text-[var(--text-muted)]">
+          {info.name}
+          {info.domain ? ` · ${info.domain}` : ""}
+        </p>
+      )}
     </div>
   );
 }
@@ -96,6 +115,10 @@ export function AppShell({
               active =
                 pathname === "/" &&
                 searchParams.get("status") === item.match.slice(7);
+            } else if (item.match.startsWith("alert=")) {
+              active =
+                pathname === "/" &&
+                searchParams.get("alert") === item.match.slice(6);
             }
             return (
               <Link

@@ -10,3 +10,6 @@ dist/
 *.tsbuildinfo
 apps/web/.env
 apps/web/.env.local
+
+.vercel
+.env*

@@ -1,5 +1,10 @@
 import { chatCompletion } from "@/lib/openrouter";
 import type { ParsedLotProduct } from "@/lib/enrichment/productIdentity";
+import {
+  buildStorefrontDescriptionHtml,
+  clampSeoDescription,
+  clampSeoTitle,
+} from "@/lib/listing/description";
 
 export interface CopywritingResult {
   title: string;
@@ -8,10 +13,10 @@ export interface CopywritingResult {
   seoTitle: string;
   seoDescription: string;
   tags: string[];
+  productType?: string;
 }
 
 export async function generateCopywriting(input: {
-  /** Exact manufacturer title — do not translate */
   manufacturerTitle: string;
   rawDescription?: string;
   unitCost?: number;
@@ -27,12 +32,18 @@ export async function generateCopywriting(input: {
 
 RÈGLES STRICTES:
 - "title" = le nom EXACT du fabricant fourni (manufacturerTitle). NE PAS traduire, NE PAS inventer, NE PAS préfixer avec une quantité de lot.
-- descriptionHtml: HTML riche (2–4 <p>, éventuellement <ul>), FR-CA, vendeur, factuel. Mentionne état usagé/testé SEULEMENT si implicite dans la source. Pas de jargon Maxx/enchères.
-- bulletPoints: 4–6 bullets concrets (specs, usage, inclus).
+- descriptionHtml: HTML riche FR-CA (2–4 <p>), vendeur, factuel. Structure:
+  1) accroche bénéfice
+  2) specs / usage
+  3) si la source implique un lot liquidation: mention discrète "article d'occasion / testé selon disponibilité" — sinon neuf/retail tone
+- bulletPoints: 4–6 bullets concrets (specs, usage, inclus, dimensions si connues).
 - seoTitle: nom fabricant + complément FR ≤70 car.
-- seoDescription: ≤155 car, accroche + bénéfice.
-- tags: 5–12 tags Shopify (marque, catégorie, attributs).
-Réponds UNIQUEMENT en JSON: title, descriptionHtml, bulletPoints (array), seoTitle, seoDescription, tags (array).`,
+- seoDescription: ≤155 car, accroche + bénéfice, sans jargon enchère.
+- productType: catégorie Shopify courte EN ou FR (ex. "Furniture", "Electronics").
+- tags: 5–12 tags (marque, catégorie, attributs). Inclus "brand:Marque" et "type:Catégorie".
+- INTERDIT: Maxx, enchère, lot, pallet, liquidation comme argument de vente.
+
+Réponds UNIQUEMENT en JSON: title, descriptionHtml, bulletPoints (array), seoTitle, seoDescription, tags (array), productType (string).`,
       },
       {
         role: "user",
@@ -55,16 +66,40 @@ Réponds UNIQUEMENT en JSON: title, descriptionHtml, bulletPoints (array), seoTi
   );
 
   const parsed = JSON.parse(content) as CopywritingResult;
+  const bullets = Array.isArray(parsed.bulletPoints) ? parsed.bulletPoints : [];
 
-  // Force manufacturer title — never trust AI translation for the title field
+  const brand = input.identity?.brand?.trim();
+  const productType =
+    typeof parsed.productType === "string" ? parsed.productType.trim() : "";
+
+  let tags = Array.isArray(parsed.tags) ? parsed.tags.map(String) : [];
+  if (brand && !tags.some((t) => t.toLowerCase().startsWith("brand:"))) {
+    tags = [`brand:${brand}`, ...tags];
+  }
+  if (productType && !tags.some((t) => t.toLowerCase().startsWith("type:"))) {
+    tags = [`type:${productType}`, ...tags];
+  }
+
+  const descriptionHtml = buildStorefrontDescriptionHtml({
+    descriptionHtml: parsed.descriptionHtml ?? "",
+    bulletPoints: bullets,
+    title: input.manufacturerTitle,
+    preWin: false,
+  });
+
   return {
     title: input.manufacturerTitle,
-    descriptionHtml: parsed.descriptionHtml ?? "",
-    bulletPoints: parsed.bulletPoints ?? [],
-    seoTitle: parsed.seoTitle?.includes(input.manufacturerTitle)
-      ? parsed.seoTitle
-      : input.manufacturerTitle.slice(0, 70),
-    seoDescription: parsed.seoDescription ?? "",
-    tags: parsed.tags ?? [],
+    descriptionHtml,
+    bulletPoints: bullets,
+    seoTitle: clampSeoTitle(
+      parsed.seoTitle?.includes(input.manufacturerTitle)
+        ? parsed.seoTitle
+        : input.manufacturerTitle
+    ),
+    seoDescription: clampSeoDescription(
+      parsed.seoDescription ?? input.rawDescription ?? input.manufacturerTitle
+    ),
+    tags,
+    productType: productType || undefined,
   };
 }

@@ -3,6 +3,7 @@ import { lensSearch } from "@/lib/serper";
 import type { ParsedLotProduct } from "@/lib/enrichment/productIdentity";
 import type { ImageProbeResult } from "@/lib/enrichment/images";
 import { validateImages } from "@/lib/enrichment/images";
+import { scrapeProductPageGallery } from "@/lib/enrichment/manufacturerImages";
 
 export type ProductImageCandidate = ImageProbeResult & {
   source: "manufacturer" | "serper" | "lens";
@@ -180,19 +181,23 @@ export async function findImagesFromMaxxReference(
   }
 
   const imageUrls: string[] = [];
-  for (const page of [...new Set(pageUrls)].slice(0, 6)) {
-    const og = await fetchOgImage(page);
-    if (og && !isBlockedImageUrl(og)) imageUrls.push(og);
+  for (const page of [...new Set(pageUrls)].slice(0, 5)) {
+    const gallery = await scrapeProductPageGallery(page);
+    imageUrls.push(...gallery);
+    if (gallery.length === 0) {
+      const og = await fetchOgImage(page);
+      if (og && !isBlockedImageUrl(og)) imageUrls.push(og);
+    }
   }
 
-  const probed = await validateImages([...new Set(imageUrls)]);
+  const probed = await validateImages([...new Set(imageUrls)].slice(0, 20));
   return probed.map((img) => ({ ...img, source: "lens" as const }));
 }
 
 async function verifySingleImageWithVision(
   img: Candidate,
   identity: ParsedLotProduct
-): Promise<boolean> {
+): Promise<"exact" | "close" | "reject"> {
   try {
     const raw = await chatCompletion(
       "imageRanking",
@@ -200,24 +205,25 @@ async function verifySingleImageWithVision(
         {
           role: "system",
           content:
-            "Strict e-commerce photo QA. You SEE the image pixels. Reject anything doubtful. JSON only.",
+            "Strict e-commerce photo QA. You SEE the image pixels. JSON only.",
         },
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: `Does this image show ONLY this exact product for sale?
+              text: `Classify this image for the product listing.
 
 Product: ${identity.manufacturerTitle}
 Brand: ${identity.brand}
 Model: ${identity.model}
-Color/finish: ${identity.color ?? "any"}
+Color/finish: ${identity.color ?? "unknown"}
 
-KEEP (exact) ONLY if the main subject is this exact SKU/model.
-REJECT: scenery, collages, wrong model, logos-only, lots/pallets.
+exact = main subject is this exact SKU/model (and color if known).
+close = same model/brand but color/angle uncertain OR minor packaging differences — only if model clearly matches.
+reject = wrong product, scenery, collage, logo-only, lot/pallet.
 
-Reply JSON: {"match":"exact"|"reject","reason":"short"}`,
+Reply JSON: {"match":"exact"|"close"|"reject","reason":"short"}`,
             },
             { type: "image_url", image_url: { url: img.url } },
           ],
@@ -227,9 +233,12 @@ Reply JSON: {"match":"exact"|"reject","reason":"short"}`,
     );
 
     const parsed = JSON.parse(raw) as { match?: string };
-    return String(parsed.match).toLowerCase() === "exact";
+    const match = String(parsed.match).toLowerCase();
+    if (match === "exact") return "exact";
+    if (match === "close") return "close";
+    return "reject";
   } catch {
-    return false;
+    return "reject";
   }
 }
 
@@ -273,20 +282,33 @@ async function filterWithVision(
     Boolean(process.env.GEMINI_API_KEY) ||
     Boolean(process.env.OPENROUTER_API_KEY);
   if (!hasVision) {
-    // Without vision QA, do not ship random Serper images
     return [];
   }
 
-  const kept: Candidate[] = [];
+  const exact: Candidate[] = [];
+  const close: Candidate[] = [];
   const batch = candidates.slice(0, 10);
 
-  // Sequential to avoid rate limits; correctness > speed
-  for (const img of batch) {
-    const ok = await verifySingleImageWithVision(img, identity);
-    if (ok) kept.push(img);
+  // Parallel batches of 3 for speed
+  for (let i = 0; i < batch.length; i += 3) {
+    const chunk = batch.slice(i, i + 3);
+    const verdicts = await Promise.all(
+      chunk.map((img) => verifySingleImageWithVision(img, identity))
+    );
+    chunk.forEach((img, idx) => {
+      const v = verdicts[idx];
+      if (v === "exact") exact.push(img);
+      else if (v === "close") close.push(img);
+    });
   }
 
-  return kept;
+  // Prefer exact; allow close only to fill gallery / when color unknown
+  if (exact.length >= 3) return exact;
+  if (identity.color) {
+    // Color known: only exact unless we have almost none
+    return exact.length > 0 ? exact : close.slice(0, 3);
+  }
+  return [...exact, ...close];
 }
 
 /**

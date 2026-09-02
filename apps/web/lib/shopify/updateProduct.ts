@@ -1,5 +1,10 @@
 import { getShopifyClient } from "@/lib/shopify/client";
 import type { Product } from "@prisma/client";
+import {
+  buildStorefrontDescriptionHtml,
+  inferProductType,
+  inferVendor,
+} from "@/lib/listing/description";
 
 const PRODUCT_UPDATE = `
   mutation productUpdate($product: ProductUpdateInput!) {
@@ -17,7 +22,6 @@ const PRODUCT_UPDATE = `
   }
 `;
 
-// Fallback for API versions still using ProductInput
 const PRODUCT_UPDATE_LEGACY = `
   mutation productUpdate($input: ProductInput!) {
     productUpdate(input: $input) {
@@ -51,21 +55,55 @@ const VARIANTS_BULK_UPDATE = `
 
 export async function updateShopifyProductContent(
   product: Product,
-  patch: { title?: string; descriptionHtml?: string; status?: "ACTIVE" | "DRAFT" }
+  patch: {
+    title?: string;
+    descriptionHtml?: string;
+    status?: "ACTIVE" | "DRAFT";
+    syncListingMeta?: boolean;
+  }
 ) {
   if (!product.shopifyProductId) {
     throw new Error("Produit non publié sur Shopify");
   }
 
   const client = getShopifyClient();
-  const payload = {
+  const descriptionHtml =
+    patch.descriptionHtml !== undefined
+      ? patch.descriptionHtml
+      : patch.syncListingMeta
+        ? buildStorefrontDescriptionHtml({
+            descriptionHtml: product.descriptionHtml,
+            bulletPoints: product.bulletPoints,
+            rawDescription: product.rawDescription,
+            title: product.title ?? product.rawTitle,
+            preWin: product.bidStatus !== "won",
+          })
+        : undefined;
+
+  const payload: Record<string, unknown> = {
     id: product.shopifyProductId,
     ...(patch.title !== undefined && { title: patch.title }),
-    ...(patch.descriptionHtml !== undefined && {
-      descriptionHtml: patch.descriptionHtml,
-    }),
+    ...(descriptionHtml !== undefined && { descriptionHtml }),
     ...(patch.status !== undefined && { status: patch.status }),
   };
+
+  if (patch.syncListingMeta) {
+    const vendor = inferVendor(product);
+    const productType = inferProductType(product);
+    payload.vendor = vendor;
+    if (productType) payload.productType = productType;
+    payload.tags = [
+      ...new Set([
+        ...product.tags,
+        ...(product.eventWeekKey ? [`event:${product.eventWeekKey}`] : []),
+        ...(vendor !== "UNIT411" ? [`brand:${vendor}`] : []),
+      ]),
+    ];
+    payload.seo = {
+      title: product.seoTitle,
+      description: product.seoDescription,
+    };
+  }
 
   try {
     const data = await client.query<{

@@ -142,34 +142,78 @@ async function extractImagesFromManufacturerSite(
 
   for (const pageUrl of candidates.slice(0, 2)) {
     try {
-      const res = await fetch(pageUrl, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (compatible; MaxxManager/1.0; +https://localhost)",
-          Accept: "text/html",
-        },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok) continue;
-      const html = await res.text();
-
-      const og =
-        html.match(/property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
-        html.match(/content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
-      if (og?.[1]) urls.push(og[1]);
-
-      const imgMatches = html.match(
-        /https?:\/\/[^"'>\s]+\.(?:jpe?g|png|webp)(?:\?[^"'>\s]*)?/gi
-      );
-      for (const match of (imgMatches ?? []).slice(0, 30)) {
-        if (!isBlockedHost(match)) urls.push(match);
-      }
+      const fromPage = await scrapeProductPageGallery(pageUrl);
+      urls.push(...fromPage);
     } catch {
       // ignore
     }
   }
 
   return [...new Set(urls)];
+}
+
+/** Scrape a product detail page gallery (og:image + product images). */
+export async function scrapeProductPageGallery(pageUrl: string): Promise<string[]> {
+  const urls: string[] = [];
+  try {
+    const res = await fetch(pageUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; MaxxManager/1.0; +https://localhost)",
+        Accept: "text/html",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+
+    const ogMatches = [
+      ...html.matchAll(
+        /property=["']og:image(?::secure_url)?["'][^>]*content=["']([^"']+)["']/gi
+      ),
+      ...html.matchAll(
+        /content=["']([^"']+)["'][^>]*property=["']og:image(?::secure_url)?["']/gi
+      ),
+    ];
+    for (const m of ogMatches) {
+      if (m[1]) urls.push(m[1]);
+    }
+
+    // JSON-LD Product images
+    const ldBlocks = html.match(
+      /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+    );
+    for (const block of ldBlocks ?? []) {
+      try {
+        const jsonText = block.replace(/^[\s\S]*?>/, "").replace(/<\/script>$/i, "");
+        const data = JSON.parse(jsonText) as
+          | { image?: string | string[]; "@type"?: string }
+          | Array<{ image?: string | string[]; "@type"?: string }>;
+        const nodes = Array.isArray(data) ? data : [data];
+        for (const node of nodes) {
+          if (!node || typeof node !== "object") continue;
+          const imgs = node.image;
+          if (typeof imgs === "string") urls.push(imgs);
+          else if (Array.isArray(imgs)) {
+            for (const i of imgs) if (typeof i === "string") urls.push(i);
+          }
+        }
+      } catch {
+        // ignore bad JSON-LD
+      }
+    }
+
+    const imgMatches = html.match(
+      /https?:\/\/[^"'>\s]+\.(?:jpe?g|png|webp)(?:\?[^"'>\s]*)?/gi
+    );
+    for (const match of (imgMatches ?? []).slice(0, 40)) {
+      if (!isBlockedHost(match)) urls.push(match);
+    }
+  } catch {
+    return [];
+  }
+
+  return [...new Set(urls.filter((u) => !isBlockedHost(u)))].slice(0, 24);
 }
 
 function resolveOfficialDomain(identity: ParsedLotProduct): string | null {

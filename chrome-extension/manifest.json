@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Maxx Manager Sniper",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Sniper des produits maxx.ca vers Maxx Manager",
   "permissions": ["storage", "activeTab"],
   "host_permissions": [

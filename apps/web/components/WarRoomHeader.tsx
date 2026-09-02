@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { CaptureMaxxForm } from "@/components/CaptureMaxxForm";
 
 function formatCountdown(ms: number): string {
   if (ms <= 0) return "Terminé";
@@ -114,10 +116,12 @@ export function WarRoomHeader({
   eventName,
   nearestEndsAt,
   kpis,
+  activeAlert,
 }: {
   eventKey: string | null;
   eventName: string | null;
   nearestEndsAt: string | null;
+  activeAlert?: string | null;
   kpis: {
     total: number;
     ready: number;
@@ -132,6 +136,73 @@ export function WarRoomHeader({
   };
 }) {
   const label = eventName ?? (eventKey ? eventKey.replace(/^maxx-/, "") : null);
+
+  const stats: Array<{
+    label: string;
+    value: string;
+    hint: string;
+    href?: string;
+    accent?: boolean;
+    success?: boolean;
+    warning?: boolean;
+    danger?: boolean;
+    active?: boolean;
+  }> = [
+    { label: "Lots", value: String(kpis.total), hint: "snipés", href: "/" },
+    {
+      label: "Prêts",
+      value: String(kpis.ready),
+      hint: "à publier",
+      accent: true,
+      href: "/?status=ready",
+    },
+    {
+      label: "Publiés",
+      value: String(kpis.published),
+      hint: "live",
+      href: "/?bid=published",
+    },
+    {
+      label: "Won",
+      value: String(kpis.won),
+      hint: "gagnés",
+      success: true,
+      href: "/?bid=won",
+    },
+    {
+      label: "Lost",
+      value: String(kpis.lost),
+      hint: "passés",
+      href: "/?bid=lost",
+    },
+    {
+      label: "Stock",
+      value: String(kpis.unitsInStock),
+      hint: "unités",
+      success: true,
+    },
+    {
+      label: "Bas",
+      value: String(kpis.lowStock),
+      hint: "alertes",
+      danger: kpis.lowStock > 0,
+      href: "/?alert=low",
+      active: activeAlert === "low",
+    },
+    {
+      label: "À assigner",
+      value: String(kpis.unassigned),
+      hint: "ready/active",
+      href: "/?alert=unassigned",
+      active: activeAlert === "unassigned",
+    },
+    {
+      label: "Capital",
+      value: `${kpis.capitalExposed.toFixed(0)} $`,
+      hint: "max bids",
+      warning: true,
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -173,64 +244,46 @@ export function WarRoomHeader({
         </div>
       </div>
 
+      <CaptureMaxxForm />
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-9">
-        {[
-          { label: "Lots", value: String(kpis.total), hint: "snipés" },
-          {
-            label: "Prêts",
-            value: String(kpis.ready),
-            hint: "à publier",
-            accent: true,
-          },
-          { label: "Publiés", value: String(kpis.published), hint: "live" },
-          { label: "Won", value: String(kpis.won), hint: "gagnés", success: true },
-          { label: "Lost", value: String(kpis.lost), hint: "passés" },
-          {
-            label: "Stock",
-            value: String(kpis.unitsInStock),
-            hint: "unités",
-            success: true,
-          },
-          {
-            label: "Bas",
-            value: String(kpis.lowStock),
-            hint: "alertes",
-            danger: kpis.lowStock > 0,
-          },
-          {
-            label: "À assigner",
-            value: String(kpis.unassigned),
-            hint: "ready/active",
-          },
-          {
-            label: "Capital",
-            value: `${kpis.capitalExposed.toFixed(0)} $`,
-            hint: "max bids",
-            warning: true,
-          },
-        ].map((stat) => (
-          <div key={stat.label} className="panel panel-glow p-3 sm:p-4">
-            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
-              {stat.label}
-            </p>
-            <p
-              className={`stat-value mt-1 text-xl sm:text-2xl ${
-                stat.accent
-                  ? "text-[var(--accent)]"
-                  : stat.success
-                    ? "text-[var(--success)]"
-                    : stat.warning
-                      ? "text-[var(--warning)]"
-                      : stat.danger
-                        ? "text-[var(--danger)]"
-                        : ""
-              }`}
-            >
-              {stat.value}
-            </p>
-            <p className="mt-0.5 text-[0.65rem] text-[var(--text-faint)]">{stat.hint}</p>
-          </div>
-        ))}
+        {stats.map((stat) => {
+          const className = `panel panel-glow block p-3 text-left transition sm:p-4 ${
+            stat.href ? "hover:border-[var(--border-strong)]" : ""
+          } ${stat.active ? "ring-1 ring-[var(--danger)]" : ""}`;
+          const body = (
+            <>
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
+                {stat.label}
+              </p>
+              <p
+                className={`stat-value mt-1 text-xl sm:text-2xl ${
+                  stat.accent
+                    ? "text-[var(--accent)]"
+                    : stat.success
+                      ? "text-[var(--success)]"
+                      : stat.warning
+                        ? "text-[var(--warning)]"
+                        : stat.danger
+                          ? "text-[var(--danger)]"
+                          : ""
+                }`}
+              >
+                {stat.value}
+              </p>
+              <p className="mt-0.5 text-[0.65rem] text-[var(--text-faint)]">{stat.hint}</p>
+            </>
+          );
+          return stat.href ? (
+            <Link key={stat.label} href={stat.href} className={className}>
+              {body}
+            </Link>
+          ) : (
+            <div key={stat.label} className={className}>
+              {body}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

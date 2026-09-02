@@ -60,6 +60,8 @@ interface Product {
   suggestedPrice: string | null;
   costPrice: string | null;
   tags: string[];
+  seoTitle?: string | null;
+  seoDescription?: string | null;
   marketAnalysis: MarketAnalysis | null;
   shopifyProductId: string | null;
   inventorySyncedAt?: string | null;
@@ -101,12 +103,18 @@ export function ProductDetailClient({ product }: { product: Product }) {
   const [price, setPrice] = useState(
     product.suggestedPrice ? Number(product.suggestedPrice).toFixed(2) : ""
   );
+  const [tagsText, setTagsText] = useState((product.tags ?? []).join(", "));
+  const [seoTitle, setSeoTitle] = useState(product.seoTitle ?? "");
+  const [seoDescription, setSeoDescription] = useState(
+    product.seoDescription ?? ""
+  );
   const [selectedImages, setSelectedImages] = useState<Set<string>>(
     new Set(product.images.filter((i) => i.isSelected).map((i) => i.id))
   );
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [shopifyBusy, setShopifyBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const market = product.marketAnalysis;
@@ -129,7 +137,11 @@ export function ProductDetailClient({ product }: { product: Product }) {
     });
   }
 
-  async function saveProduct() {
+  async function saveProduct(opts?: { syncShopifyContent?: boolean }) {
+    const tags = tagsText
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
     const res = await fetch(`/api/products/${product.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -138,10 +150,19 @@ export function ProductDetailClient({ product }: { product: Product }) {
         descriptionHtml: description,
         suggestedPrice: parseFloat(price),
         selectedImageIds: Array.from(selectedImages),
+        tags,
+        seoTitle: seoTitle.trim() || null,
+        seoDescription: seoDescription.trim() || null,
+        ...(opts?.syncShopifyContent ? { syncShopifyContent: true } : {}),
       }),
     });
-    if (!res.ok) throw new Error("Échec de la sauvegarde");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error ?? "Échec de la sauvegarde");
+    if (data.shopifyContentSync?.ok === false) {
+      throw new Error(`Sauvé localement · Shopify: ${data.shopifyContentSync.error}`);
+    }
     router.refresh();
+    return data;
   }
 
   async function handleSave() {
@@ -150,10 +171,54 @@ export function ProductDetailClient({ product }: { product: Product }) {
     try {
       await saveProduct();
       setMessage("Modifications sauvegardées");
-    } catch {
-      setMessage("Erreur lors de la sauvegarde");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Erreur lors de la sauvegarde");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveAndSyncShopify() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await saveProduct({ syncShopifyContent: true });
+      setMessage(
+        product.shopifyProductId
+          ? "Sauvé + synchronisé sur Shopify"
+          : "Sauvé (pas encore publié sur Shopify)"
+      );
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Erreur sync Shopify");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function setShopifyListingStatus(status: "ACTIVE" | "DRAFT") {
+    setShopifyBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/products/${product.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopifyStatus: status }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Échec statut Shopify");
+      if (data.shopifyContentSync?.ok === false) {
+        throw new Error(data.shopifyContentSync.error ?? "Échec Shopify");
+      }
+      setMessage(
+        status === "DRAFT"
+          ? "Listing Shopify passé en brouillon"
+          : "Listing Shopify réactivé"
+      );
+      router.refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Erreur Shopify");
+    } finally {
+      setShopifyBusy(false);
     }
   }
 
@@ -292,6 +357,35 @@ export function ProductDetailClient({ product }: { product: Product }) {
           <button onClick={handleSave} disabled={saving} className="btn btn-secondary">
             {saving ? "Sauvegarde…" : "Sauvegarder"}
           </button>
+          {product.shopifyProductId && (
+            <button
+              onClick={() => void handleSaveAndSyncShopify()}
+              disabled={saving}
+              className="btn btn-primary"
+            >
+              {saving ? "Sync…" : "Sauver + sync Shopify"}
+            </button>
+          )}
+          {product.shopifyProductId && (
+            <button
+              type="button"
+              onClick={() => void setShopifyListingStatus("DRAFT")}
+              disabled={shopifyBusy}
+              className="btn btn-ghost"
+            >
+              Brouillon Shopify
+            </button>
+          )}
+          {product.shopifyProductId && (
+            <button
+              type="button"
+              onClick={() => void setShopifyListingStatus("ACTIVE")}
+              disabled={shopifyBusy}
+              className="btn btn-ghost"
+            >
+              Réactiver
+            </button>
+          )}
           {product.status === "ready" && !product.shopifyProductId && (
             <button
               onClick={handlePublish}
@@ -380,7 +474,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {(["won", "lost", "skipped"] as const).map((s) => (
+          {(["watching", "capped", "won", "lost", "skipped"] as const).map((s) => (
             <button
               key={s}
               type="button"
@@ -391,7 +485,9 @@ export function ProductDetailClient({ product }: { product: Product }) {
                     ? "bg-[var(--success)] text-[#0a0c0b]"
                     : s === "lost"
                       ? "bg-[var(--danger)] text-white"
-                      : "bg-[var(--text-faint)] text-[#0a0c0b]"
+                      : s === "watching" || s === "capped"
+                        ? "bg-[var(--warning)] text-[#0a0c0b]"
+                        : "bg-[var(--text-faint)] text-[#0a0c0b]"
                   : "border border-[var(--border)] text-[var(--text-muted)]"
               }`}
             >
@@ -536,6 +632,36 @@ export function ProductDetailClient({ product }: { product: Product }) {
                 />
               </div>
               <div>
+                <label className="field-label">Tags (virgules)</label>
+                <input
+                  type="text"
+                  value={tagsText}
+                  onChange={(e) => setTagsText(e.target.value)}
+                  className="field"
+                  placeholder="maxx, liquide, brand…"
+                />
+              </div>
+              <div>
+                <label className="field-label">SEO titre</label>
+                <input
+                  type="text"
+                  value={seoTitle}
+                  onChange={(e) => setSeoTitle(e.target.value)}
+                  className="field"
+                  maxLength={120}
+                />
+              </div>
+              <div>
+                <label className="field-label">SEO description</label>
+                <textarea
+                  value={seoDescription}
+                  onChange={(e) => setSeoDescription(e.target.value)}
+                  rows={3}
+                  className="field"
+                  maxLength={320}
+                />
+              </div>
+              <div>
                 <label className="field-label">Description HTML</label>
                 <textarea
                   value={description}
@@ -544,6 +670,16 @@ export function ProductDetailClient({ product }: { product: Product }) {
                   className="field font-mono text-[0.8rem] leading-relaxed"
                 />
               </div>
+              {product.shopifyProductId && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={saving}
+                  onClick={() => void handleSaveAndSyncShopify()}
+                >
+                  {saving ? "Sync…" : "Sauver + pousser sur Shopify"}
+                </button>
+              )}
             </section>
           )}
 

@@ -1,5 +1,3 @@
-import { prisma } from "@/lib/db";
-import { Prisma } from "@prisma/client";
 import { escapeHtml } from "@/lib/html";
 import { isAnyAiConfigured } from "@/lib/openrouter";
 import { generateCopywriting } from "@/lib/enrichment/copywriting";
@@ -7,6 +5,7 @@ import { runMarketAnalysis } from "@/lib/enrichment/market";
 import {
   findManufacturerImages,
   MIN_PRODUCT_IMAGES,
+  scrapeProductPageGallery,
 } from "@/lib/enrichment/manufacturerImages";
 import {
   verifyProductImages,
@@ -23,15 +22,24 @@ import {
 } from "@/lib/enrichment/pricing";
 import type { CopywritingResult } from "@/lib/enrichment/copywriting";
 import type { MarketAnalysis } from "@/lib/enrichment/market";
+import { buildStorefrontDescriptionHtml } from "@/lib/listing/description";
+import { normalizeImageUrl } from "@/lib/enrichment/images";
+import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
+
+const MAX_STOREFRONT_IMAGES = 10;
+const MAX_MAXX_TAIL_IMAGES = 4;
 
 function fallbackCopy(manufacturerTitle: string, rawDescription?: string | null): CopywritingResult {
   const safeTitle = escapeHtml(manufacturerTitle);
   const safeDesc = rawDescription ? escapeHtml(rawDescription) : null;
   return {
     title: manufacturerTitle,
-    descriptionHtml: safeDesc
-      ? `<p>${safeDesc}</p>`
-      : `<p>${safeTitle}</p>`,
+    descriptionHtml: buildStorefrontDescriptionHtml({
+      descriptionHtml: safeDesc ? `<p>${safeDesc}</p>` : `<p>${safeTitle}</p>`,
+      bulletPoints: [],
+      title: manufacturerTitle,
+    }),
     bulletPoints: [],
     seoTitle: manufacturerTitle.slice(0, 70),
     seoDescription: (rawDescription ?? manufacturerTitle).slice(0, 160),
@@ -267,33 +275,55 @@ export async function enrichProduct(productId: string): Promise<void> {
 
     await prisma.productImage.deleteMany({ where: { productId } });
 
+    const manufacturerSelected = Math.min(
+      6,
+      Math.max(rankedImages.length, 0)
+    );
+    const manufacturerRows = rankedImages.map((img, index) => ({
+      productId,
+      url: img.url,
+      width: img.width || null,
+      height: img.height || null,
+      source: img.source,
+      isSelected: index < manufacturerSelected,
+      position: index,
+      score: 1 - index * 0.1,
+    }));
+
+    // Maxx lot photos last (real condition) — selected after manufacturer heroes
+    const maxxTail = [...new Set(maxxRefs.map(normalizeImageUrl))]
+      .filter(Boolean)
+      .slice(0, MAX_MAXX_TAIL_IMAGES)
+      .map((url, i) => ({
+        productId,
+        url,
+        width: null as number | null,
+        height: null as number | null,
+        source: "maxx",
+        isSelected: true,
+        position: manufacturerRows.length + i,
+        score: 0.2 - i * 0.02,
+      }));
+
+    // Cap total selected storefront images
+    const allRows = [...manufacturerRows, ...maxxTail];
+    let selectedSoFar = 0;
+    const cappedRows = allRows.map((row) => {
+      if (!row.isSelected) return row;
+      selectedSoFar += 1;
+      if (selectedSoFar > MAX_STOREFRONT_IMAGES) {
+        return { ...row, isSelected: false };
+      }
+      return row;
+    });
+
+    if (cappedRows.length > 0) {
+      await prisma.productImage.createMany({ data: cappedRows });
+    }
+
     if (rankedImages.length >= MIN_PRODUCT_IMAGES) {
-      const selectedCount = Math.min(6, rankedImages.length);
-      await prisma.productImage.createMany({
-        data: rankedImages.map((img, index) => ({
-          productId,
-          url: img.url,
-          width: img.width || null,
-          height: img.height || null,
-          source: img.source,
-          isSelected: index < selectedCount,
-          position: index,
-          score: 1 - index * 0.1,
-        })),
-      });
+      // ok
     } else if (rankedImages.length > 0) {
-      await prisma.productImage.createMany({
-        data: rankedImages.map((img, index) => ({
-          productId,
-          url: img.url,
-          width: img.width || null,
-          height: img.height || null,
-          source: img.source,
-          isSelected: true,
-          position: index,
-          score: 1 - index * 0.1,
-        })),
-      });
       warnings.push(
         `Seulement ${rankedImages.length}/${MIN_PRODUCT_IMAGES} images exactes trouvées`
       );
@@ -302,6 +332,12 @@ export async function enrichProduct(productId: string): Promise<void> {
     } else {
       warnings.push(
         `Aucune image exacte pour « ${identity.manufacturerTitle} » (min ${MIN_PRODUCT_IMAGES})`
+      );
+    }
+
+    if (maxxTail.length > 0) {
+      warnings.push(
+        `${maxxTail.length} photo(s) Maxx ajoutée(s) en fin de galerie`
       );
     }
 
@@ -324,8 +360,19 @@ export async function enrichProduct(productId: string): Promise<void> {
       copy = fallbackCopy(identity.manufacturerTitle, product.rawDescription);
     }
 
-    // Always force manufacturer title
+    // Always force manufacturer title + merge bullets into HTML
     copy.title = identity.manufacturerTitle;
+    copy.descriptionHtml = buildStorefrontDescriptionHtml({
+      descriptionHtml: copy.descriptionHtml,
+      bulletPoints: copy.bulletPoints,
+      title: identity.manufacturerTitle,
+    });
+    if (copy.productType && !copy.tags.some((t) => t.toLowerCase().startsWith("type:"))) {
+      copy.tags = [`type:${copy.productType}`, ...copy.tags];
+    }
+    if (identity.brand && !copy.tags.some((t) => t.toLowerCase().startsWith("brand:"))) {
+      copy.tags = [`brand:${identity.brand}`, ...copy.tags];
+    }
 
     // 4) Market — per unit
     let market: MarketAnalysis;
@@ -339,6 +386,9 @@ export async function enrichProduct(productId: string): Promise<void> {
         lotQuantity,
         lotPrice,
         articlesInWeek,
+        brand: identity.brand,
+        model: identity.model,
+        color: identity.color ?? undefined,
       });
     } catch (err) {
       console.warn("Market analysis fallback:", err);

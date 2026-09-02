@@ -1,5 +1,11 @@
 import { getShopifyClient } from "@/lib/shopify/client";
 import type { Product, ProductImage } from "@prisma/client";
+import {
+  buildStorefrontDescriptionHtml,
+  inferProductType,
+  inferVendor,
+  marketCompareAtPrice,
+} from "@/lib/listing/description";
 
 const PRODUCT_CREATE = `
   mutation productCreate($input: ProductInput!) {
@@ -149,6 +155,20 @@ const PRODUCT_UPDATE = `
   }
 `;
 
+const INVENTORY_ITEM_UPDATE = `
+  mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
+    inventoryItemUpdate(id: $id, input: $input) {
+      inventoryItem {
+        id
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 function generateSku(productId: string): string {
   return `MAXX-${productId.slice(0, 8).toUpperCase()}`;
 }
@@ -183,6 +203,14 @@ async function waitForMediaReady(shopifyProductId: string, maxWaitMs = 30000): P
   throw new Error("Timed out waiting for Shopify media to be ready");
 }
 
+async function countShopifyMedia(shopifyProductId: string): Promise<number> {
+  const client = getShopifyClient();
+  const data = await client.query<{
+    product: { media: { nodes: Array<{ status: string }> } } | null;
+  }>(PRODUCT_MEDIA_STATUS, { id: shopifyProductId });
+  return data.product?.media.nodes.length ?? 0;
+}
+
 export interface PublishResult {
   shopifyProductId: string;
   shopifyVariantId: string | null;
@@ -193,14 +221,31 @@ export async function publishProductToShopify(
   product: Product,
   images: ProductImage[],
   options?: {
-    /** Persist GID immediately so retries don't duplicate the Shopify product */
     onProductCreated?: (shopifyProductId: string) => Promise<void>;
   }
 ): Promise<PublishResult> {
   const client = getShopifyClient();
   const isFirstCreate = !product.shopifyProductId;
 
-  // Idempotent retry: continue from existing Shopify product if already linked
+  const descriptionHtml = buildStorefrontDescriptionHtml({
+    descriptionHtml: product.descriptionHtml,
+    bulletPoints: product.bulletPoints,
+    rawDescription: product.rawDescription,
+    title: product.title ?? product.rawTitle,
+    preWin: product.bidStatus !== "won",
+  });
+
+  const vendor = inferVendor(product);
+  const productType = inferProductType(product);
+  const tags = [
+    ...new Set([
+      ...product.tags,
+      "maxx-pre-win",
+      ...(product.eventWeekKey ? [`event:${product.eventWeekKey}`] : []),
+      ...(vendor && vendor !== "UNIT411" ? [`brand:${vendor}`] : []),
+    ]),
+  ];
+
   let shopifyProductId = product.shopifyProductId;
   if (!shopifyProductId) {
     const createData = await client.query<{
@@ -211,13 +256,10 @@ export async function publishProductToShopify(
     }>(PRODUCT_CREATE, {
       input: {
         title: product.title ?? product.rawTitle,
-        descriptionHtml: product.descriptionHtml ?? product.rawDescription ?? "",
-        vendor: "Maxx",
-        tags: [
-          ...product.tags,
-          "maxx-pre-win",
-          ...(product.eventWeekKey ? [`event:${product.eventWeekKey}`] : []),
-        ],
+        descriptionHtml,
+        vendor,
+        ...(productType ? { productType } : {}),
+        tags,
         status: "ACTIVE",
         seo: {
           title: product.seoTitle,
@@ -240,11 +282,34 @@ export async function publishProductToShopify(
     if (options?.onProductCreated) {
       await options.onProductCreated(shopifyProductId);
     }
+  } else {
+    // Keep listing content fresh on retry / re-publish
+    await client.query(PRODUCT_UPDATE, {
+      input: {
+        id: shopifyProductId,
+        title: product.title ?? product.rawTitle,
+        descriptionHtml,
+        vendor,
+        ...(productType ? { productType } : {}),
+        tags,
+        status: "ACTIVE",
+        seo: {
+          title: product.seoTitle,
+          description: product.seoDescription,
+        },
+      },
+    });
   }
 
+  // Manufacturer first, Maxx last (position order; source maxx ties last)
   const selectedImages = images
     .filter((img) => img.isSelected)
-    .sort((a, b) => a.position - b.position);
+    .sort((a, b) => {
+      const aMaxx = a.source === "maxx" ? 1 : 0;
+      const bMaxx = b.source === "maxx" ? 1 : 0;
+      if (aMaxx !== bMaxx) return aMaxx - bMaxx;
+      return a.position - b.position;
+    });
 
   const price = product.suggestedPrice
     ? Number(product.suggestedPrice).toFixed(2)
@@ -252,7 +317,12 @@ export async function publishProductToShopify(
       ? Number(product.rawPrice).toFixed(2)
       : "0.00";
 
-  // Resolve a location so we can set inventory to 0 explicitly
+  const compareAt = marketCompareAtPrice(product.marketAnalysis);
+  const compareAtPrice =
+    compareAt && product.suggestedPrice && compareAt > Number(product.suggestedPrice)
+      ? compareAt.toFixed(2)
+      : undefined;
+
   let locationId: string | null = null;
   try {
     const locData = await client.query<{
@@ -267,6 +337,10 @@ export async function publishProductToShopify(
   }
 
   const sku = product.sku ?? generateSku(product.id);
+  const cost =
+    product.costPrice != null && Number(product.costPrice) > 0
+      ? Number(product.costPrice).toFixed(2)
+      : undefined;
 
   let shopifyVariantId = product.shopifyVariantId;
   let shopifyInventoryItemId = product.shopifyInventoryItemId;
@@ -274,10 +348,12 @@ export async function publishProductToShopify(
   if (!shopifyVariantId || !shopifyInventoryItemId) {
     const variantInput: Record<string, unknown> = {
       price,
+      ...(compareAtPrice ? { compareAtPrice } : {}),
       inventoryPolicy: "DENY",
       inventoryItem: {
         sku,
         tracked: true,
+        ...(cost ? { cost } : {}),
       },
     };
 
@@ -342,13 +418,26 @@ export async function publishProductToShopify(
     }
   }
 
-  // Ensure product stays ACTIVE (some stores default draft on variant create)
+  if (shopifyInventoryItemId && cost) {
+    try {
+      await client.query(INVENTORY_ITEM_UPDATE, {
+        id: shopifyInventoryItemId,
+        input: { cost },
+      });
+    } catch (err) {
+      console.warn("Could not set inventory item cost:", err);
+    }
+  }
+
   await client.query(PRODUCT_UPDATE, {
     input: { id: shopifyProductId, status: "ACTIVE" },
   });
 
-  if (selectedImages.length > 0 && isFirstCreate) {
-    // Only attach media on first publish attempt (not every retry)
+  const existingMediaCount = isFirstCreate
+    ? 0
+    : await countShopifyMedia(shopifyProductId).catch(() => 0);
+
+  if (selectedImages.length > 0 && (isFirstCreate || existingMediaCount === 0)) {
     const mediaData = await client.query<{
       productCreateMedia: {
         mediaUserErrors: Array<{ message: string }>;
@@ -358,7 +447,9 @@ export async function publishProductToShopify(
       media: selectedImages.map((img, index) => ({
         mediaContentType: "IMAGE",
         originalSource: img.url,
-        alt: `${product.title ?? product.rawTitle} - Image ${index + 1}`,
+        alt: `${product.title ?? product.rawTitle}${
+          img.source === "maxx" ? " (lot Maxx)" : ""
+        } - Image ${index + 1}`,
       })),
     });
 
