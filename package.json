@@ -1,0 +1,8 @@
+{
+  "name": "maxx-manager",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --prefix apps/web",
+    "dev": "npm run dev --prefix apps/web"
+  }
+}
