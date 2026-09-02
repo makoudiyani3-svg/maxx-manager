@@ -191,48 +191,60 @@ export interface PublishResult {
 
 export async function publishProductToShopify(
   product: Product,
-  images: ProductImage[]
+  images: ProductImage[],
+  options?: {
+    /** Persist GID immediately so retries don't duplicate the Shopify product */
+    onProductCreated?: (shopifyProductId: string) => Promise<void>;
+  }
 ): Promise<PublishResult> {
   const client = getShopifyClient();
+  const isFirstCreate = !product.shopifyProductId;
+
+  // Idempotent retry: continue from existing Shopify product if already linked
+  let shopifyProductId = product.shopifyProductId;
+  if (!shopifyProductId) {
+    const createData = await client.query<{
+      productCreate: {
+        product: { id: string } | null;
+        userErrors: Array<{ message: string }>;
+      };
+    }>(PRODUCT_CREATE, {
+      input: {
+        title: product.title ?? product.rawTitle,
+        descriptionHtml: product.descriptionHtml ?? product.rawDescription ?? "",
+        vendor: "Maxx",
+        tags: [
+          ...product.tags,
+          "maxx-pre-win",
+          ...(product.eventWeekKey ? [`event:${product.eventWeekKey}`] : []),
+        ],
+        status: "ACTIVE",
+        seo: {
+          title: product.seoTitle,
+          description: product.seoDescription,
+        },
+      },
+    });
+
+    if (createData.productCreate.userErrors.length > 0) {
+      throw new Error(
+        createData.productCreate.userErrors.map((e) => e.message).join(", ")
+      );
+    }
+
+    shopifyProductId = createData.productCreate.product?.id ?? null;
+    if (!shopifyProductId) {
+      throw new Error("Failed to create Shopify product");
+    }
+
+    if (options?.onProductCreated) {
+      await options.onProductCreated(shopifyProductId);
+    }
+  }
 
   const selectedImages = images
     .filter((img) => img.isSelected)
     .sort((a, b) => a.position - b.position);
-
-  const createData = await client.query<{
-    productCreate: {
-      product: { id: string } | null;
-      userErrors: Array<{ message: string }>;
-    };
-  }>(PRODUCT_CREATE, {
-    input: {
-      title: product.title ?? product.rawTitle,
-      descriptionHtml: product.descriptionHtml ?? product.rawDescription ?? "",
-      vendor: "Maxx",
-      tags: [
-        ...product.tags,
-        "maxx-pre-win",
-        ...(product.eventWeekKey ? [`event:${product.eventWeekKey}`] : []),
-      ],
-      // Live before auction win — inventory stays 0 (DENY)
-      status: "ACTIVE",
-      seo: {
-        title: product.seoTitle,
-        description: product.seoDescription,
-      },
-    },
-  });
-
-  if (createData.productCreate.userErrors.length > 0) {
-    throw new Error(
-      createData.productCreate.userErrors.map((e) => e.message).join(", ")
-    );
-  }
-
-  const shopifyProductId = createData.productCreate.product?.id;
-  if (!shopifyProductId) {
-    throw new Error("Failed to create Shopify product");
-  }
 
   const price = product.suggestedPrice
     ? Number(product.suggestedPrice).toFixed(2)
@@ -254,67 +266,79 @@ export async function publishProductToShopify(
     console.warn("Could not fetch Shopify locations:", err);
   }
 
-  const variantInput: Record<string, unknown> = {
-    price,
-    inventoryPolicy: "DENY",
-    inventoryItem: {
-      sku: generateSku(product.id),
-      tracked: true,
-    },
-  };
+  const sku = product.sku ?? generateSku(product.id);
 
-  if (locationId) {
-    variantInput.inventoryQuantities = [
-      {
-        availableQuantity: 0,
-        locationId,
-      },
-    ];
-  }
-
-  const variantData = await client.query<{
-    productVariantsBulkCreate: {
-      productVariants: Array<{
-        id: string;
-        inventoryItem: { id: string } | null;
-      }> | null;
-      userErrors: Array<{ message: string }>;
-    };
-  }>(VARIANTS_BULK_CREATE, {
-    productId: shopifyProductId,
-    strategy: "REMOVE_STANDALONE_VARIANT",
-    variants: [variantInput],
-  });
-
-  if (variantData.productVariantsBulkCreate.userErrors.length > 0) {
-    throw new Error(
-      variantData.productVariantsBulkCreate.userErrors.map((e) => e.message).join(", ")
-    );
-  }
-
-  let shopifyVariantId =
-    variantData.productVariantsBulkCreate.productVariants?.[0]?.id ?? null;
-  let shopifyInventoryItemId =
-    variantData.productVariantsBulkCreate.productVariants?.[0]?.inventoryItem
-      ?.id ?? null;
+  let shopifyVariantId = product.shopifyVariantId;
+  let shopifyInventoryItemId = product.shopifyInventoryItemId;
 
   if (!shopifyVariantId || !shopifyInventoryItemId) {
-    try {
-      const variantsData = await client.query<{
-        product: {
-          variants: {
-            nodes: Array<{ id: string; inventoryItem: { id: string } | null }>;
-          };
-        } | null;
-      }>(PRODUCT_VARIANTS, { id: shopifyProductId });
-      const first = variantsData.product?.variants.nodes.find(
-        (v) => v.inventoryItem?.id
+    const variantInput: Record<string, unknown> = {
+      price,
+      inventoryPolicy: "DENY",
+      inventoryItem: {
+        sku,
+        tracked: true,
+      },
+    };
+
+    if (locationId) {
+      variantInput.inventoryQuantities = [
+        {
+          availableQuantity: 0,
+          locationId,
+        },
+      ];
+    }
+
+    const variantData = await client.query<{
+      productVariantsBulkCreate: {
+        productVariants: Array<{
+          id: string;
+          inventoryItem: { id: string } | null;
+        }> | null;
+        userErrors: Array<{ message: string }>;
+      };
+    }>(VARIANTS_BULK_CREATE, {
+      productId: shopifyProductId,
+      strategy: "REMOVE_STANDALONE_VARIANT",
+      variants: [variantInput],
+    });
+
+    if (variantData.productVariantsBulkCreate.userErrors.length > 0) {
+      throw new Error(
+        variantData.productVariantsBulkCreate.userErrors
+          .map((e) => e.message)
+          .join(", ")
       );
-      shopifyVariantId = first?.id ?? shopifyVariantId;
-      shopifyInventoryItemId =
-        first?.inventoryItem?.id ?? shopifyInventoryItemId;
-    } catch (err) {
-      console.warn("Could not resolve Shopify variant ids:", err);
+    }
+
+    shopifyVariantId =
+      variantData.productVariantsBulkCreate.productVariants?.[0]?.id ?? null;
+    shopifyInventoryItemId =
+      variantData.productVariantsBulkCreate.productVariants?.[0]?.inventoryItem
+        ?.id ?? null;
+
+    if (!shopifyVariantId || !shopifyInventoryItemId) {
+      try {
+        const variantsData = await client.query<{
+          product: {
+            variants: {
+              nodes: Array<{
+                id: string;
+                inventoryItem: { id: string } | null;
+              }>;
+            };
+          } | null;
+        }>(PRODUCT_VARIANTS, { id: shopifyProductId });
+        const first = variantsData.product?.variants.nodes.find(
+          (v) => v.inventoryItem?.id
+        );
+        shopifyVariantId = first?.id ?? shopifyVariantId;
+        shopifyInventoryItemId =
+          first?.inventoryItem?.id ?? shopifyInventoryItemId;
+      } catch (err) {
+        console.warn("Could not resolve Shopify variant ids:", err);
+      }
     }
   }
 
@@ -323,7 +347,8 @@ export async function publishProductToShopify(
     input: { id: shopifyProductId, status: "ACTIVE" },
   });
 
-  if (selectedImages.length > 0) {
+  if (selectedImages.length > 0 && isFirstCreate) {
+    // Only attach media on first publish attempt (not every retry)
     const mediaData = await client.query<{
       productCreateMedia: {
         mediaUserErrors: Array<{ message: string }>;
@@ -339,7 +364,9 @@ export async function publishProductToShopify(
 
     if (mediaData.productCreateMedia.mediaUserErrors.length > 0) {
       throw new Error(
-        mediaData.productCreateMedia.mediaUserErrors.map((e) => e.message).join(", ")
+        mediaData.productCreateMedia.mediaUserErrors
+          .map((e) => e.message)
+          .join(", ")
       );
     }
 
@@ -366,14 +393,16 @@ export async function publishProductToShopify(
 
     if (publishData.publishablePublish.userErrors.length > 0) {
       throw new Error(
-        publishData.publishablePublish.userErrors.map((e) => e.message).join(", ")
+        publishData.publishablePublish.userErrors
+          .map((e) => e.message)
+          .join(", ")
       );
     }
   }
 
   return {
     shopifyProductId,
-    shopifyVariantId,
-    shopifyInventoryItemId,
+    shopifyVariantId: shopifyVariantId ?? null,
+    shopifyInventoryItemId: shopifyInventoryItemId ?? null,
   };
 }

@@ -12,7 +12,7 @@ export type InventoryReason =
   | "damage"
   | "other";
 
-export interface AdjustInventoryInput {
+export type AdjustInventoryInput = {
   productId: string;
   /** Absolute target quantity (preferred) OR use delta */
   quantity?: number;
@@ -21,9 +21,10 @@ export interface AdjustInventoryInput {
   note?: string;
   createdBy?: string | null;
   shopifyOrderId?: string | null;
+  shopifyLineItemId?: string | null;
   /** Push new qty to Shopify when product is published */
   syncShopify?: boolean;
-}
+};
 
 export async function adjustInventory(input: AdjustInventoryInput) {
   const product = await prisma.product.findUnique({
@@ -62,6 +63,7 @@ export async function adjustInventory(input: AdjustInventoryInput) {
         note: input.note ?? null,
         createdBy: input.createdBy ?? null,
         shopifyOrderId: input.shopifyOrderId ?? null,
+        shopifyLineItemId: input.shopifyLineItemId ?? null,
       },
     });
 
@@ -105,6 +107,8 @@ export async function adjustInventory(input: AdjustInventoryInput) {
 export function isLowStock(product: Pick<Product, "stockQty" | "lowStockThreshold" | "bidStatus" | "status">) {
   if (product.bidStatus === "lost" || product.bidStatus === "skipped") return false;
   if (product.status === "captured" || product.status === "enriching") return false;
+  // Pre-win published lots intentionally at 0 — not a low-stock alert
+  if (product.bidStatus === "published" && product.stockQty === 0) return false;
   return product.stockQty <= product.lowStockThreshold;
 }
 

@@ -9,6 +9,21 @@
     },
     "app/api/publish/[id]/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/shopify/sync-catalog/route.ts": {
+      "maxDuration": 120
+    },
+    "app/api/shopify/webhooks/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/sync-orders/route.ts": {
+      "maxDuration": 120
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/sync-orders",
+      "schedule": "*/15 * * * *"
+    }
+  ]
 }

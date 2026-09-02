@@ -23,19 +23,25 @@ export async function GET() {
       suggestedPrice: true,
       actualCostUnit: true,
       costPrice: true,
+      shopifyAvailableQty: true,
     },
     orderBy: { stockQty: "asc" },
   });
 
   const lowStock = products.filter(isLowStock);
+  const oversold = products.filter(
+    (p) => p.shopifyAvailableQty != null && p.shopifyAvailableQty < 0
+  );
   const unassigned = products.filter(
     (p) => !p.assignedTo && (p.status === "ready" || p.status === "active")
   );
 
   return Response.json({
     lowStockCount: lowStock.length,
+    oversoldCount: oversold.length,
     unassignedCount: unassigned.length,
     lowStock,
+    oversold,
     unassigned: unassigned.slice(0, 20),
   });
 }

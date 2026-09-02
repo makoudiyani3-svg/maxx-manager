@@ -40,6 +40,8 @@ export interface ImageProbeResult {
 
 export async function probeImage(url: string): Promise<ImageProbeResult | null> {
   try {
+    const { assertSafeExternalUrl } = await import("@/lib/urlSafety");
+    assertSafeExternalUrl(url);
     const probe = (await import("probe-image-size")).default;
     const result = await probe(url, {
       headers: {
@@ -57,8 +59,14 @@ export async function probeImage(url: string): Promise<ImageProbeResult | null> 
       valid: width >= MIN_IMAGE_WIDTH || (width === 0 && height === 0),
     };
   } catch {
-    // Keep URL even if probe fails (hotlink/CDN blocks HEAD)
-    return { url, width: 0, height: 0, valid: true };
+    // Keep URL even if probe fails (hotlink/CDN blocks HEAD) — unless SSRF
+    try {
+      const { assertSafeExternalUrl } = await import("@/lib/urlSafety");
+      assertSafeExternalUrl(url);
+      return { url, width: 0, height: 0, valid: true };
+    } catch {
+      return null;
+    }
   }
 }
 

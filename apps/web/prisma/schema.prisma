@@ -47,13 +47,17 @@ model Product {
   /// Available sellable units (source of truth in Maxx Manager)
   stockQty           Int       @default(0) @map("stock_qty")
   lowStockThreshold  Int       @default(1) @map("low_stock_threshold")
+  /// Last known Shopify available qty (may be negative / oversold)
+  shopifyAvailableQty Int?     @map("shopify_available_qty")
+  /// Variant SKU (Shopify or generated MAXX-…)
+  sku                String?   @map("sku")
   /// Real auction cost when won (lot total before premium/transport split)
   actualCostLot      Decimal?  @map("actual_cost_lot") @db.Decimal(10, 2)
   actualCostUnit     Decimal?  @map("actual_cost_unit") @db.Decimal(10, 2)
   assignedTo         String?   @map("assigned_to")
   internalNotes      String?   @map("internal_notes") @db.Text
 
-  shopifyProductId       String?   @map("shopify_product_id")
+  shopifyProductId       String?   @unique @map("shopify_product_id")
   shopifyVariantId       String?   @map("shopify_variant_id")
   shopifyInventoryItemId String?   @map("shopify_inventory_item_id")
   shopifyStatus          String?   @map("shopify_status")
@@ -71,6 +75,7 @@ model Product {
   @@index([bidStatus])
   @@index([stockQty])
   @@index([assignedTo])
+  @@index([sku])
   @@map("products")
 }
 
@@ -102,10 +107,13 @@ model InventoryMovement {
   note           String?
   createdBy      String?  @map("created_by")
   shopifyOrderId String?  @map("shopify_order_id")
+  /// Line item GID — unique with order for sale idempotency
+  shopifyLineItemId String? @map("shopify_line_item_id")
   createdAt      DateTime @default(now()) @map("created_at")
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
+  @@unique([shopifyOrderId, shopifyLineItemId])
   @@index([productId])
   @@index([shopifyOrderId])
   @@index([createdAt])

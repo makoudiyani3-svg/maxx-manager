@@ -173,6 +173,16 @@ export function parseMaxxEventFromUrl(sourceUrl: string): {
   }
 }
 
+/** True when event week key is a weak proxy (transport $400 not shared correctly). */
+export function isWeakEventWeekKey(eventWeekKey: string | null | undefined): boolean {
+  if (!eventWeekKey) return true;
+  return (
+    eventWeekKey.startsWith("maxx-lotweek-") ||
+    eventWeekKey.startsWith("maxx-url-") ||
+    eventWeekKey === "maxx-unknown"
+  );
+}
+
 export function dealMathToJson(deal: DealMathResult): Prisma.InputJsonValue {
   return deal as unknown as Prisma.InputJsonValue;
 }

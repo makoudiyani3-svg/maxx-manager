@@ -12,6 +12,11 @@ export function getAllowedEmails(): string[] {
       .map((e) => e.trim().toLowerCase())
       .filter(Boolean);
   }
+  // Production must set ALLOWED_EMAILS — no hardcoded fallback on Vercel
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    console.error("ALLOWED_EMAILS manquant en production");
+    return [];
+  }
   return DEFAULT_ALLOWED_EMAILS.map((e) => e.toLowerCase());
 }
 

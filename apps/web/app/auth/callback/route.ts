@@ -18,7 +18,9 @@ export async function GET(request: Request) {
         await supabase.auth.signOut();
         return NextResponse.redirect(`${origin}/login?error=forbidden`);
       }
-      return NextResponse.redirect(`${origin}${next.startsWith("/") ? next : "/"}`);
+      const safeNext =
+        next.startsWith("/") && !next.startsWith("//") ? next : "/";
+      return NextResponse.redirect(`${origin}${safeNext}`);
     }
   }
 

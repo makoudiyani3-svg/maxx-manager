@@ -16,6 +16,7 @@ import { parseLotToProduct } from "@/lib/enrichment/productIdentity";
 import {
   computeDealMath,
   parseMaxxEventFromUrl,
+  isWeakEventWeekKey,
   WEEKLY_TRANSPORT_CAD,
   AUCTION_PREMIUM_RATE,
 } from "@/lib/enrichment/pricing";
@@ -364,7 +365,12 @@ export async function enrichProduct(productId: string): Promise<void> {
     market.deal = deal;
     market.unitCost = deal.unitLandedAtMaxBid;
 
-    if (!deal.isViable) {
+    if (isWeakEventWeekKey(eventWeekKey)) {
+      deal.isViable = false;
+      deal.skipReason =
+        "Event Maxx manquant — transport 400$/sem non partagé correctement. Relance avec URL event.";
+      warnings.push(deal.skipReason);
+    } else if (!deal.isViable) {
       warnings.push(deal.skipReason ?? "Deal non viable (marge 100%)");
     }
 

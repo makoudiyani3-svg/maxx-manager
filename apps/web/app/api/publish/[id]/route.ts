@@ -90,7 +90,17 @@ export async function POST(
   });
 
   try {
-    const published = await publishProductToShopify(product, product.images);
+    const published = await publishProductToShopify(product, product.images, {
+      onProductCreated: async (shopifyProductId) => {
+        await prisma.product.update({
+          where: { id },
+          data: {
+            shopifyProductId,
+            sku: product.sku ?? `MAXX-${id.slice(0, 8).toUpperCase()}`,
+          },
+        });
+      },
+    });
 
     await prisma.product.update({
       where: { id },
@@ -101,6 +111,7 @@ export async function POST(
         shopifyInventoryItemId: published.shopifyInventoryItemId,
         shopifyStatus: "ACTIVE",
         bidStatus: "published",
+        sku: product.sku ?? `MAXX-${id.slice(0, 8).toUpperCase()}`,
       },
     });
 

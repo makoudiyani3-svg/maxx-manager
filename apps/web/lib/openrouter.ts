@@ -47,6 +47,8 @@ async function fetchImageInlinePart(
   url: string
 ): Promise<GeminiPart | { text: string }> {
   try {
+    const { assertSafeExternalUrl } = await import("@/lib/urlSafety");
+    assertSafeExternalUrl(url);
     const response = await fetch(url, {
       signal: AbortSignal.timeout(10_000),
       headers: { Accept: "image/*,*/*" },
