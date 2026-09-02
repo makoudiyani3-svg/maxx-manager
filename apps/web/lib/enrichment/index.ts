@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { escapeHtml } from "@/lib/html";
+import { isAnyAiConfigured } from "@/lib/openrouter";
 import { generateCopywriting } from "@/lib/enrichment/copywriting";
 import { runMarketAnalysis } from "@/lib/enrichment/market";
 import {
@@ -307,11 +308,7 @@ export async function enrichProduct(productId: string): Promise<void> {
     // 3) Copy — title locked to manufacturer name
     let copy: CopywritingResult;
     try {
-      if (
-        !process.env.OPENROUTER_API_KEY &&
-        !process.env.GEMINI_API_KEY &&
-        !process.env.ANTHROPIC_API_KEY
-      ) {
+      if (!isAnyAiConfigured()) {
         throw new Error("No AI provider configured");
       }
       copy = await generateCopywriting({
@@ -333,11 +330,7 @@ export async function enrichProduct(productId: string): Promise<void> {
     // 4) Market — per unit
     let market: MarketAnalysis;
     try {
-      if (
-        !process.env.OPENROUTER_API_KEY &&
-        !process.env.GEMINI_API_KEY &&
-        !process.env.ANTHROPIC_API_KEY
-      ) {
+      if (!isAnyAiConfigured()) {
         throw new Error("No AI provider configured");
       }
       market = await runMarketAnalysis({

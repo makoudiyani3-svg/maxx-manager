@@ -269,6 +269,7 @@ async function filterWithVision(
   if (candidates.length === 0) return [];
 
   const hasVision =
+    Boolean(process.env.ANTHROPIC_API_KEY) ||
     Boolean(process.env.GEMINI_API_KEY) ||
     Boolean(process.env.OPENROUTER_API_KEY);
   if (!hasVision) {
@@ -319,7 +320,9 @@ export async function verifyProductImages(
     images: afterVision,
     lensRejected,
     visionUsed: Boolean(
-      process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY
+      process.env.ANTHROPIC_API_KEY ||
+        process.env.GEMINI_API_KEY ||
+        process.env.OPENROUTER_API_KEY
     ),
   };
 }

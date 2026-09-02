@@ -42,11 +42,15 @@ export async function runMarketAnalysis(input: {
     [
       {
         role: "system",
-        content: `Tu es analyste e-commerce Québec/Canada pour un revendeur liquidation.
+        content: `Tu es analyste pricing senior Québec/Canada pour UNIT411 (liquidation → Shopify).
+
 Analyse UN SEUL article (pas le lot).
-suggestedPrice = prix de vente Shopify concurrentiel pour 1 unité (ancré sur le marché, souvent un peu sous la médiane).
-Marge cible du business: 100% sur le coût landed (vente ≥ 2× coût) — tu proposes le prix marché; le système calcule le plafond d'enchère à part.
-Réponds UNIQUEMENT en JSON: competitorPrices (number[]), suggestedPrice (number), marginPercent (number), demandScore (1-10), competitionLevel ("low"|"medium"|"high"), recommendation ("publish"|"review"|"skip"), summary (français court).`,
+suggestedPrice = prix Shopify concurrentiel pour 1 unité, ancré sur le marché (souvent ~5–12% sous la médiane si concurrence haute).
+Marge business cible: vente ≥ 2× coût landed — tu proposes le prix marché; le plafond enchère est calculé ailleurs.
+Si peu de prix concurrents, sois conservateur et recommendation="review".
+summary: 1–2 phrases FR-CA actionnables.
+
+Réponds UNIQUEMENT en JSON: competitorPrices (number[]), suggestedPrice (number), marginPercent (number), demandScore (1-10), competitionLevel ("low"|"medium"|"high"), recommendation ("publish"|"review"|"skip"), summary (string).`,
       },
       {
         role: "user",
@@ -57,11 +61,11 @@ Réponds UNIQUEMENT en JSON: competitorPrices (number[]), suggestedPrice (number
           prix_lot_source: input.lotPrice,
           prix_concurrents_trouves: competitorPrices,
           mediane_marche: median(competitorPrices),
-          resultats_shopping: shoppingResults.slice(0, 5),
+          resultats_shopping: shoppingResults.slice(0, 8),
         }),
       },
     ],
-    { json: true, temperature: 0.3 }
+    { json: true, temperature: 0.25, maxTokens: 4096 }
   );
 
   const parsed = JSON.parse(content) as MarketAnalysis;

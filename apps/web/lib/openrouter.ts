@@ -2,7 +2,7 @@ const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
 const ANTHROPIC_BASE = "https://api.anthropic.com/v1/messages";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-export type AiTask = "copywriting" | "market" | "imageRanking";
+export type AiTask = "copywriting" | "market" | "imageRanking" | "identity";
 
 /** @deprecated use AiTask */
 export type OpenRouterTask = AiTask;
@@ -11,18 +11,31 @@ const OPENROUTER_MODEL_BY_TASK: Record<AiTask, string> = {
   copywriting: process.env.OPENROUTER_MODEL_COPY ?? "google/gemini-2.5-flash",
   market: process.env.OPENROUTER_MODEL_MARKET ?? "deepseek/deepseek-chat-v3-0324",
   imageRanking: process.env.OPENROUTER_MODEL_VISION ?? "google/gemini-2.5-flash",
+  identity: process.env.OPENROUTER_MODEL_COPY ?? "google/gemini-2.5-flash",
 };
 
-/** Gemini Flash — backup simple et peu cher */
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
-/** Claude Haiku — optionnel si clé scoped à un workspace */
-const ANTHROPIC_MODEL =
-  process.env.ANTHROPIC_MODEL ?? "claude-3-5-haiku-20241022";
+/** Claude Sonnet — primary when ANTHROPIC_API_KEY is set */
+const ANTHROPIC_MODEL_DEFAULT =
+  process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
+
+const ANTHROPIC_MODEL_BY_TASK: Record<AiTask, string> = {
+  copywriting:
+    process.env.ANTHROPIC_MODEL_COPY ?? ANTHROPIC_MODEL_DEFAULT,
+  market: process.env.ANTHROPIC_MODEL_MARKET ?? ANTHROPIC_MODEL_DEFAULT,
+  imageRanking:
+    process.env.ANTHROPIC_MODEL_VISION ?? ANTHROPIC_MODEL_DEFAULT,
+  identity:
+    process.env.ANTHROPIC_MODEL_IDENTITY ?? ANTHROPIC_MODEL_DEFAULT,
+};
 
 type MessageContent =
   | string
-  | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+  | Array<
+      | { type: "text"; text: string }
+      | { type: "image_url"; image_url: { url: string } }
+    >;
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -32,6 +45,17 @@ interface ChatMessage {
 type GeminiPart =
   | { text: string }
   | { inlineData: { mimeType: string; data: string } };
+
+type AnthropicContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image";
+      source: {
+        type: "base64";
+        media_type: string;
+        data: string;
+      };
+    };
 
 function contentToText(content: MessageContent): string {
   if (typeof content === "string") return content;
@@ -43,38 +67,57 @@ function contentToText(content: MessageContent): string {
     .join("\n");
 }
 
-async function fetchImageInlinePart(
+function messagesHaveImages(messages: ChatMessage[]): boolean {
+  return messages.some(
+    (m) =>
+      Array.isArray(m.content) &&
+      m.content.some((p) => p.type === "image_url")
+  );
+}
+
+export function isAnthropicConfigured(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+export function isAnyAiConfigured(): boolean {
+  return Boolean(
+    process.env.ANTHROPIC_API_KEY ||
+      process.env.OPENROUTER_API_KEY ||
+      process.env.GEMINI_API_KEY
+  );
+}
+
+async function fetchImageBase64(
   url: string
-): Promise<GeminiPart | { text: string }> {
+): Promise<{ mimeType: string; data: string } | null> {
   try {
     const { assertSafeExternalUrl } = await import("@/lib/urlSafety");
     assertSafeExternalUrl(url);
     const response = await fetch(url, {
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(12_000),
       headers: { Accept: "image/*,*/*" },
     });
-    if (!response.ok) {
-      return { text: `[image fetch failed: ${url}]` };
-    }
+    if (!response.ok) return null;
     const mime =
       response.headers.get("content-type")?.split(";")[0]?.trim() ||
       "image/jpeg";
-    if (!mime.startsWith("image/")) {
-      return { text: `[not an image: ${url}]` };
-    }
+    if (!mime.startsWith("image/")) return null;
     const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength > 4_500_000) {
-      return { text: `[image too large: ${url}]` };
-    }
-    return {
-      inlineData: {
-        mimeType: mime,
-        data: buffer.toString("base64"),
-      },
-    };
+    if (buffer.byteLength > 4_500_000) return null;
+    return { mimeType: mime, data: buffer.toString("base64") };
   } catch {
-    return { text: `[image unreachable: ${url}]` };
+    return null;
   }
+}
+
+async function fetchImageInlinePart(
+  url: string
+): Promise<GeminiPart | { text: string }> {
+  const img = await fetchImageBase64(url);
+  if (!img) return { text: `[image unreachable: ${url}]` };
+  return {
+    inlineData: { mimeType: img.mimeType, data: img.data },
+  };
 }
 
 async function contentToGeminiParts(
@@ -90,6 +133,33 @@ async function contentToGeminiParts(
     }
   }
   return parts;
+}
+
+async function contentToAnthropicBlocks(
+  content: MessageContent
+): Promise<AnthropicContentBlock[]> {
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  const blocks: AnthropicContentBlock[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
+      blocks.push({ type: "text", text: part.text });
+      continue;
+    }
+    const img = await fetchImageBase64(part.image_url.url);
+    if (img) {
+      blocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: img.mimeType,
+          data: img.data,
+        },
+      });
+    } else {
+      blocks.push({ type: "text", text: `[image unreachable: ${part.image_url.url}]` });
+    }
+  }
+  return blocks.length > 0 ? blocks : [{ type: "text", text: "" }];
 }
 
 async function chatViaOpenRouter(
@@ -117,7 +187,9 @@ async function chatViaOpenRouter(
   });
 
   if (!response.ok) {
-    throw new Error(`OpenRouter error (${response.status}): ${await response.text()}`);
+    throw new Error(
+      `OpenRouter error (${response.status}): ${await response.text()}`
+    );
   }
 
   const data = (await response.json()) as {
@@ -140,7 +212,9 @@ async function chatViaGemini(
     .map((m) => contentToText(m.content));
 
   if (options?.json) {
-    systemParts.push("Réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni texte autour.");
+    systemParts.push(
+      "Réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni texte autour."
+    );
   }
 
   const contents = [];
@@ -185,8 +259,9 @@ async function chatViaGemini(
 }
 
 async function chatViaAnthropic(
+  task: AiTask,
   messages: ChatMessage[],
-  options?: { json?: boolean; temperature?: number }
+  options?: { json?: boolean; temperature?: number; maxTokens?: number }
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
@@ -196,15 +271,30 @@ async function chatViaAnthropic(
     .map((m) => contentToText(m.content));
 
   if (options?.json) {
-    systemParts.push("Réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni texte autour.");
+    systemParts.push(
+      "Réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni texte autour."
+    );
   }
 
-  const conversation = messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: contentToText(m.content),
-    }));
+  const conversation: Array<{
+    role: "user" | "assistant";
+    content: string | AnthropicContentBlock[];
+  }> = [];
+
+  for (const m of messages.filter((msg) => msg.role !== "system")) {
+    const role = m.role as "user" | "assistant";
+    if (Array.isArray(m.content) && messagesHaveImages([m])) {
+      conversation.push({
+        role,
+        content: await contentToAnthropicBlocks(m.content),
+      });
+    } else {
+      conversation.push({
+        role,
+        content: contentToText(m.content),
+      });
+    }
+  }
 
   if (conversation.length === 0) {
     throw new Error("No messages to send to Anthropic");
@@ -224,12 +314,16 @@ async function chatViaAnthropic(
     headers["anthropic-workspace-id"] = workspaceId;
   }
 
+  const maxTokens =
+    options?.maxTokens ??
+    (task === "copywriting" ? 8192 : task === "imageRanking" ? 2048 : 4096);
+
   const response = await fetch(ANTHROPIC_BASE, {
     method: "POST",
     headers,
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 4096,
+      model: ANTHROPIC_MODEL_BY_TASK[task],
+      max_tokens: maxTokens,
       temperature: options?.temperature ?? 0.7,
       system: systemParts.join("\n\n") || undefined,
       messages: conversation,
@@ -240,7 +334,7 @@ async function chatViaAnthropic(
     const text = await response.text();
     if (text.includes("anthropic-workspace-id")) {
       throw new Error(
-        "Clé Anthropic multi-workspace: créez une clé scoped à 1 workspace, ou utilisez GEMINI_API_KEY à la place."
+        "Clé Anthropic multi-workspace: créez une clé scoped à 1 workspace (Console Anthropic)."
       );
     }
     throw new Error(`Anthropic error (${response.status}): ${text}`);
@@ -255,63 +349,80 @@ async function chatViaAnthropic(
 }
 
 /**
- * Ordre: pour vision (imageRanking + pixels) → Gemini d'abord.
- * Sinon: OpenRouter → Gemini → Anthropic.
+ * Maximize quality when Claude is configured:
+ * - Text (copy / market / identity): Anthropic → OpenRouter → Gemini
+ * - Vision (imageRanking): Anthropic (vision) → Gemini → OpenRouter
  */
-function messagesHaveImages(messages: ChatMessage[]): boolean {
-  return messages.some(
-    (m) =>
-      Array.isArray(m.content) &&
-      m.content.some((p) => p.type === "image_url")
-  );
-}
-
 export async function chatCompletion(
   task: AiTask,
   messages: ChatMessage[],
-  options?: { json?: boolean; temperature?: number }
+  options?: { json?: boolean; temperature?: number; maxTokens?: number }
 ): Promise<string> {
   const errors: string[] = [];
   const needsVision = task === "imageRanking" && messagesHaveImages(messages);
+  const preferAnthropic =
+    process.env.AI_PRIMARY !== "openrouter" &&
+    process.env.AI_PRIMARY !== "gemini" &&
+    Boolean(process.env.ANTHROPIC_API_KEY);
 
-  if (needsVision && process.env.GEMINI_API_KEY) {
+  const tryAnthropic = async () => {
+    if (!process.env.ANTHROPIC_API_KEY) return null;
     try {
-      return await chatViaGemini(messages, options);
+      return await chatViaAnthropic(task, messages, options);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn("Gemini vision failed:", msg);
-      errors.push(`Gemini: ${msg}`);
+      console.warn("Anthropic failed:", msg);
+      errors.push(`Anthropic: ${msg}`);
+      return null;
     }
-  }
+  };
 
-  if (process.env.OPENROUTER_API_KEY) {
+  const tryOpenRouter = async () => {
+    if (!process.env.OPENROUTER_API_KEY) return null;
     try {
       return await chatViaOpenRouter(task, messages, options);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("OpenRouter failed:", msg);
       errors.push(`OpenRouter: ${msg}`);
+      return null;
     }
-  }
+  };
 
-  if (process.env.GEMINI_API_KEY) {
+  const tryGemini = async () => {
+    if (!process.env.GEMINI_API_KEY) return null;
     try {
       return await chatViaGemini(messages, options);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("Gemini failed:", msg);
       errors.push(`Gemini: ${msg}`);
+      return null;
     }
+  };
+
+  if (preferAnthropic) {
+    const first = await tryAnthropic();
+    if (first) return first;
   }
 
-  if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      return await chatViaAnthropic(messages, options);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn("Anthropic failed:", msg);
-      errors.push(`Anthropic: ${msg}`);
-    }
+  // Vision: Gemini is a strong cheap backup after Claude
+  if (needsVision && process.env.GEMINI_API_KEY) {
+    const gem = await tryGemini();
+    if (gem) return gem;
+  }
+
+  if (!preferAnthropic) {
+    const claude = await tryAnthropic();
+    if (claude) return claude;
+  }
+
+  const or = await tryOpenRouter();
+  if (or) return or;
+
+  if (!needsVision) {
+    const gem = await tryGemini();
+    if (gem) return gem;
   }
 
   if (errors.length > 0) {
@@ -319,6 +430,6 @@ export async function chatCompletion(
   }
 
   throw new Error(
-    "Aucun fournisseur IA configuré. Ajoutez GEMINI_API_KEY (recommandé) ou OPENROUTER_API_KEY."
+    "Aucun fournisseur IA configuré. Ajoutez ANTHROPIC_API_KEY (recommandé), GEMINI_API_KEY ou OPENROUTER_API_KEY."
   );
 }

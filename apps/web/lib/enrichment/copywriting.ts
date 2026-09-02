@@ -23,12 +23,15 @@ export async function generateCopywriting(input: {
     [
       {
         role: "system",
-        content: `Tu es copywriter e-commerce.
+        content: `Tu es copywriter e-commerce senior pour UNIT411 (revente Canada / Québec).
+
 RÈGLES STRICTES:
 - "title" = le nom EXACT du fabricant fourni (manufacturerTitle). NE PAS traduire, NE PAS inventer, NE PAS préfixer avec une quantité de lot.
-- descriptionHtml, seoDescription, bulletPoints: français canadien OK.
-- seoTitle peut garder le nom fabricant + un complément FR court.
-- Ne parle PAS du lot Maxx / enchères / liquidation dans le titre.
+- descriptionHtml: HTML riche (2–4 <p>, éventuellement <ul>), FR-CA, vendeur, factuel. Mentionne état usagé/testé SEULEMENT si implicite dans la source. Pas de jargon Maxx/enchères.
+- bulletPoints: 4–6 bullets concrets (specs, usage, inclus).
+- seoTitle: nom fabricant + complément FR ≤70 car.
+- seoDescription: ≤155 car, accroche + bénéfice.
+- tags: 5–12 tags Shopify (marque, catégorie, attributs).
 Réponds UNIQUEMENT en JSON: title, descriptionHtml, bulletPoints (array), seoTitle, seoDescription, tags (array).`,
       },
       {
@@ -37,6 +40,8 @@ Réponds UNIQUEMENT en JSON: title, descriptionHtml, bulletPoints (array), seoTi
           manufacturerTitle: input.manufacturerTitle,
           brand: input.identity?.brand,
           model: input.identity?.model,
+          color: input.identity?.color,
+          attributes: input.identity?.attributes,
           description_source: input.rawDescription ?? "",
           unitCostCad: input.unitCost,
           note:
@@ -46,7 +51,7 @@ Réponds UNIQUEMENT en JSON: title, descriptionHtml, bulletPoints (array), seoTi
         }),
       },
     ],
-    { json: true, temperature: 0.4 }
+    { json: true, temperature: 0.45, maxTokens: 8192 }
   );
 
   const parsed = JSON.parse(content) as CopywritingResult;

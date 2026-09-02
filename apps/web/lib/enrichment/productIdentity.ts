@@ -86,7 +86,7 @@ export async function parseLotToProduct(input: {
 
   try {
     const content = await chatCompletion(
-      "copywriting",
+      "identity",
       [
         {
           role: "system",
@@ -98,31 +98,23 @@ Rules:
 - color = finish/color of the item AS SOLD on the listing if known (walnut, black, white oak…). null if unknown.
 - attributes = other variant clues (size 47", 5-tier, folding…).
 - searchQueries MUST include the exact product name AND color/finish when known, for Google Images of THAT exact SKU/variant. Never auctions, never maxx, never wrong colors.
-- unitCost = lot price / lotQuantity when lotQuantity > 1.
+- manufacturerDomain = official brand site host if known (e.g. ecovacs.com), else null.
+- Be precise: wrong color/model ruins image QA.
 
-Respond ONLY valid JSON:
-{
-  "lotQuantity": number,
-  "manufacturerTitle": "exact manufacturer name, not translated",
-  "brand": "brand",
-  "model": "model/series",
-  "manufacturerDomain": "wayfair.com or brand.com or null",
-  "color": "walnut|black|null",
-  "attributes": ["47 inch", "..."],
-  "searchQueries": ["5-8 English Google Images queries for EXACT product+color photos"],
-  "unitCost": number or null
-}`,
+Return ONLY JSON:
+{ lotQuantity, manufacturerTitle, brand, model, manufacturerDomain, color, attributes, searchQueries, unitCost }`,
         },
         {
           role: "user",
           content: JSON.stringify({
-            lotTitle: input.rawTitle,
-            description: (input.rawDescription ?? "").slice(0, 1200),
-            lotPriceCad: input.rawPrice ?? null,
+            rawTitle: input.rawTitle,
+            rawDescription: input.rawDescription ?? null,
+            rawPrice: input.rawPrice ?? null,
+            heuristicFallback: fallback,
           }),
         },
       ],
-      { json: true, temperature: 0.1 }
+      { json: true, temperature: 0.1, maxTokens: 2048 }
     );
 
     const parsed = JSON.parse(content) as Partial<ParsedLotProduct>;
