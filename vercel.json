@@ -4,23 +4,6 @@
   "installCommand": "npm install --prefix apps/web",
   "buildCommand": "npm run build --prefix apps/web",
   "outputDirectory": "apps/web/.next",
-  "functions": {
-    "apps/web/app/api/enrich/[id]/route.ts": {
-      "maxDuration": 60
-    },
-    "apps/web/app/api/publish/[id]/route.ts": {
-      "maxDuration": 60
-    },
-    "apps/web/app/api/shopify/sync-catalog/route.ts": {
-      "maxDuration": 120
-    },
-    "apps/web/app/api/shopify/webhooks/route.ts": {
-      "maxDuration": 60
-    },
-    "apps/web/app/api/cron/sync-orders/route.ts": {
-      "maxDuration": 120
-    }
-  },
   "crons": [
     {
       "path": "/api/cron/sync-orders",
