@@ -343,17 +343,16 @@ export function ProductDetailClient({ product }: { product: Product }) {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {(product.status === "error" ||
-            product.status === "captured" ||
-            product.status === "ready") && (
-            <button
-              onClick={handleReenrich}
-              disabled={enriching}
-              className="btn btn-ghost"
-            >
-              {enriching ? "Enrichissement…" : "Relancer IA"}
-            </button>
-          )}
+          <button
+            onClick={handleReenrich}
+            disabled={enriching || product.status === "enriching"}
+            className="btn btn-ghost"
+            title="Relancer photos, description et analyse de marché"
+          >
+            {enriching || product.status === "enriching"
+              ? "Enrichissement…"
+              : "Relancer IA"}
+          </button>
           <button onClick={handleSave} disabled={saving} className="btn btn-secondary">
             {saving ? "Sauvegarde…" : "Sauvegarder"}
           </button>
