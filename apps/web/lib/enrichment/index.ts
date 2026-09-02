@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { escapeHtml } from "@/lib/html";
 import { generateCopywriting } from "@/lib/enrichment/copywriting";
 import { runMarketAnalysis } from "@/lib/enrichment/market";
 import {
@@ -22,11 +23,13 @@ import type { CopywritingResult } from "@/lib/enrichment/copywriting";
 import type { MarketAnalysis } from "@/lib/enrichment/market";
 
 function fallbackCopy(manufacturerTitle: string, rawDescription?: string | null): CopywritingResult {
+  const safeTitle = escapeHtml(manufacturerTitle);
+  const safeDesc = rawDescription ? escapeHtml(rawDescription) : null;
   return {
     title: manufacturerTitle,
-    descriptionHtml: rawDescription
-      ? `<p>${rawDescription}</p>`
-      : `<p>${manufacturerTitle}</p>`,
+    descriptionHtml: safeDesc
+      ? `<p>${safeDesc}</p>`
+      : `<p>${safeTitle}</p>`,
     bulletPoints: [],
     seoTitle: manufacturerTitle.slice(0, 70),
     seoDescription: (rawDescription ?? manufacturerTitle).slice(0, 160),

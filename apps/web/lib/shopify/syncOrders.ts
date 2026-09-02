@@ -13,8 +13,11 @@ const ORDERS_QUERY = `
         id
         name
         createdAt
+        cancelledAt
+        displayFinancialStatus
         lineItems(first: 50) {
           nodes {
+            id
             quantity
             sku
             variant {
@@ -36,8 +39,11 @@ type OrdersPage = {
     nodes: Array<{
       id: string;
       name: string;
+      cancelledAt: string | null;
+      displayFinancialStatus: string | null;
       lineItems: {
         nodes: Array<{
+          id: string;
           quantity: number;
           sku: string | null;
           variant: {
@@ -74,6 +80,17 @@ export async function syncShopifyOrders(options?: {
 
     for (const order of page.orders.nodes) {
       processedOrders += 1;
+
+      if (order.cancelledAt) {
+        skipped += 1;
+        continue;
+      }
+      const financial = (order.displayFinancialStatus ?? "").toUpperCase();
+      if (financial === "REFUNDED" || financial === "VOIDED") {
+        skipped += 1;
+        continue;
+      }
+
       for (const line of order.lineItems.nodes) {
         const shopifyProductId = line.variant?.product?.id;
         const variantId = line.variant?.id;
@@ -86,6 +103,7 @@ export async function syncShopifyOrders(options?: {
           where: {
             shopifyOrderId: order.id,
             reason: "sale",
+            note: { contains: line.id },
             product: {
               OR: [
                 { shopifyProductId },
@@ -120,7 +138,7 @@ export async function syncShopifyOrders(options?: {
             productId: product.id,
             delta: -Math.abs(line.quantity),
             reason: "sale",
-            note: `Shopify ${order.name}`,
+            note: `Shopify ${order.name} · ${line.id}`,
             createdBy: options?.createdBy ?? "shopify-sync",
             shopifyOrderId: order.id,
             syncShopify: false,

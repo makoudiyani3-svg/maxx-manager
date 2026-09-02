@@ -102,8 +102,10 @@ export function ProductRowActions({
     Boolean(product.shopifyProductId) &&
     !product.inventorySyncedAt;
   const canPublish =
-    (product.status === "ready" || product.status === "error") &&
-    !product.shopifyProductId;
+    product.status === "ready" &&
+    !product.shopifyProductId &&
+    product.bidStatus !== "skipped" &&
+    product.bidStatus !== "lost";
 
   const disabled = Boolean(busy) || pending;
 

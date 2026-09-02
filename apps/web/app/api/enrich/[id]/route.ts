@@ -1,12 +1,22 @@
 import { NextRequest } from "next/server";
 import { enrichProduct } from "@/lib/enrichment";
+import { validateApiKey } from "@/lib/auth";
+import { requireDashboardUser } from "@/lib/auth/session";
 
 export const maxDuration = 60;
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const apiKey = validateApiKey(request);
+  if (!apiKey.ok) {
+    const session = await requireDashboardUser();
+    if (!session.ok) {
+      return session.response;
+    }
+  }
+
   const { id } = await params;
 
   try {

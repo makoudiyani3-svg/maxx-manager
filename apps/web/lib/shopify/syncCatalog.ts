@@ -84,8 +84,9 @@ function shopifySourceUrl(productGid: string): string {
 
 /**
  * Import / refresh Shopify catalog into Maxx Manager.
- * Creates local products for Shopify items not yet in DB, updates stock & price for matches.
- * No location UI — uses Shopify inventoryQuantity aggregate.
+ * Creates local products for Shopify items not yet in DB (initial stock from Shopify).
+ * Updates metadata/IDs for matches — does NOT overwrite stockQty (ledger + order sync own qty).
+ * No location UI — uses Shopify inventoryQuantity aggregate only on create.
  */
 export async function syncShopifyCatalog(options?: { maxPages?: number }) {
   const client = getShopifyClient();
@@ -121,6 +122,8 @@ export async function syncShopifyCatalog(options?: { maxPages?: number }) {
         });
 
         if (existing) {
+          // Do NOT overwrite stockQty — Maxx ledger + order sync own sellable qty.
+          // Catalog refresh updates metadata / Shopify IDs only.
           await prisma.product.update({
             where: { id: existing.id },
             data: {
@@ -128,12 +131,10 @@ export async function syncShopifyCatalog(options?: { maxPages?: number }) {
               descriptionHtml: node.descriptionHtml ?? existing.descriptionHtml,
               suggestedPrice: Number.isFinite(price) ? price : existing.suggestedPrice,
               tags: node.tags?.length ? node.tags : existing.tags,
-              stockQty,
               shopifyProductId: node.id,
               shopifyVariantId: variant.id,
               shopifyInventoryItemId: variant.inventoryItem?.id ?? existing.shopifyInventoryItemId,
               shopifyStatus: node.status,
-              inventorySyncedAt: new Date(),
               status: existing.status === "captured" ? "active" : existing.status,
               bidStatus:
                 existing.bidStatus === "watching" && stockQty > 0
@@ -143,19 +144,6 @@ export async function syncShopifyCatalog(options?: { maxPages?: number }) {
                     : existing.bidStatus,
             },
           });
-
-          if (existing.stockQty !== stockQty) {
-            await prisma.inventoryMovement.create({
-              data: {
-                productId: existing.id,
-                delta: stockQty - existing.stockQty,
-                quantityAfter: stockQty,
-                reason: "adjust",
-                note: "Shopify catalog sync",
-                createdBy: "shopify-catalog-sync",
-              },
-            });
-          }
 
           // Refresh images if none selected
           const imageCount = await prisma.productImage.count({

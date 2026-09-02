@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { z } from "zod";
+import { sanitizeHtml } from "@/lib/html";
 import { computeDealMath } from "@/lib/enrichment/pricing";
 import { adjustInventory } from "@/lib/inventory/adjust";
 import {
@@ -8,6 +9,7 @@ import {
   updateShopifyVariantPrice,
 } from "@/lib/shopify/updateProduct";
 import type { Prisma } from "@prisma/client";
+import { requireDashboardUser } from "@/lib/auth/session";
 
 const updateSchema = z.object({
   title: z.string().optional(),
@@ -30,6 +32,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireDashboardUser();
+  if (!auth.ok) return auth.response;
+
   const { id } = await params;
 
   try {
@@ -117,7 +122,7 @@ export async function PATCH(
       data: {
         ...(data.title !== undefined && { title: data.title }),
         ...(data.descriptionHtml !== undefined && {
-          descriptionHtml: data.descriptionHtml,
+          descriptionHtml: sanitizeHtml(data.descriptionHtml),
         }),
         ...(data.suggestedPrice !== undefined && {
           suggestedPrice: data.suggestedPrice,

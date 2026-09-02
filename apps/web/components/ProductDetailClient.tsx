@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Countdown } from "@/components/WarRoomHeader";
 import { InventoryPanel } from "@/components/InventoryPanel";
+import { sanitizeHtml } from "@/lib/html";
 
 const SHOPIFY_STORE_SLUG = "3efvmm-mp";
 
@@ -556,7 +557,9 @@ export function ProductDetailClient({ product }: { product: Product }) {
               )}
               <div
                 className="prose-preview mt-5 border-t border-[var(--border)] pt-5 text-sm"
-                dangerouslySetInnerHTML={{ __html: description || "<p>Aucune description</p>" }}
+                dangerouslySetInnerHTML={{
+                  __html: sanitizeHtml(description || "<p>Aucune description</p>"),
+                }}
               />
             </section>
           )}

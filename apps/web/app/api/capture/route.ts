@@ -1,8 +1,9 @@
-import { NextRequest } from "next/server";
+import { after, NextRequest } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { validateApiKey, unauthorizedResponse } from "@/lib/auth";
+import { enrichProduct } from "@/lib/enrichment";
 import { normalizeImageUrl } from "@/lib/enrichment/images";
 import { parseMaxxEventFromUrl } from "@/lib/enrichment/pricing";
 
@@ -82,14 +83,15 @@ export async function POST(request: NextRequest) {
     });
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin;
-    const enrichUrl = `${appUrl}/api/enrich/${product.id}`;
 
-    fetch(enrichUrl, {
-      method: "POST",
-      headers: {
-        Authorization: request.headers.get("authorization") ?? "",
-      },
-    }).catch((err) => console.error("Failed to trigger enrichment:", err));
+    // In-process enrich (avoid HTTP hop + middleware 401 on MAXX_API_KEY-only calls)
+    after(async () => {
+      try {
+        await enrichProduct(product.id);
+      } catch (err) {
+        console.error(`Enrichment after capture failed for ${product.id}:`, err);
+      }
+    });
 
     return Response.json({
       success: true,
