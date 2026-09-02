@@ -9,10 +9,13 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "auth:seed": "node --env-file=.env.local scripts/seed-auth-users.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.114.0",
     "next": "16.3.3",
     "probe-image-size": "^7.4.0",
     "react": "19.2.8",

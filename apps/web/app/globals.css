@@ -171,6 +171,20 @@ a {
   text-transform: uppercase;
   color: var(--text-muted);
 }
+.field-input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.95rem;
+  outline: none;
+}
+.field-input:focus {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
 
 .badge {
   display: inline-flex;

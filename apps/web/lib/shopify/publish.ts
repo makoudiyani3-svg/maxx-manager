@@ -18,14 +18,22 @@ const PRODUCT_CREATE = `
 `;
 
 const VARIANTS_BULK_CREATE = `
-  mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-    productVariantsBulkCreate(productId: $productId, variants: $variants) {
+  mutation productVariantsBulkCreate(
+    $productId: ID!
+    $variants: [ProductVariantsBulkInput!]!
+    $strategy: ProductVariantsBulkCreateStrategy
+  ) {
+    productVariantsBulkCreate(
+      productId: $productId
+      variants: $variants
+      strategy: $strategy
+    ) {
       productVariants {
         id
         price
-        sku
         inventoryItem {
           id
+          sku
         }
       }
       userErrors {
@@ -248,8 +256,11 @@ export async function publishProductToShopify(
 
   const variantInput: Record<string, unknown> = {
     price,
-    sku: generateSku(product.id),
     inventoryPolicy: "DENY",
+    inventoryItem: {
+      sku: generateSku(product.id),
+      tracked: true,
+    },
   };
 
   if (locationId) {
@@ -271,6 +282,7 @@ export async function publishProductToShopify(
     };
   }>(VARIANTS_BULK_CREATE, {
     productId: shopifyProductId,
+    strategy: "REMOVE_STANDALONE_VARIANT",
     variants: [variantInput],
   });
 

@@ -49,11 +49,22 @@ function ShopifyHealthDot() {
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  userEmail,
+}: {
+  children: React.ReactNode;
+  userEmail?: string | null;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isProduct = pathname.startsWith("/products/");
+  const isLogin = pathname.startsWith("/login");
   const query = searchParams.toString();
+
+  if (isLogin) {
+    return <>{children}</>;
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -105,6 +116,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="space-y-3 border-t border-[var(--border)] p-4">
           <ShopifyHealthDot />
+          {userEmail && (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+              <p className="truncate text-[0.7rem] text-[var(--text-muted)]">{userEmail}</p>
+              <form action="/auth/signout" method="post" className="mt-2">
+                <button
+                  type="submit"
+                  className="text-[0.7rem] font-medium text-[var(--danger)] hover:underline"
+                >
+                  Déconnexion
+                </button>
+              </form>
+            </div>
+          )}
           <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
             <p className="text-xs font-semibold text-[var(--text)]">Ops enchères</p>
             <p className="mt-1 text-[0.7rem] leading-relaxed text-[var(--text-faint)]">
@@ -116,11 +140,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--bg)]/80 backdrop-blur-xl lg:hidden">
-          <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
             <Link href="/" className="font-display text-base font-bold">
               Maxx<span className="text-[var(--accent)]">.</span>Manager
             </Link>
-            <ShopifyHealthDot />
+            <div className="flex items-center gap-3">
+              <ShopifyHealthDot />
+              {userEmail && (
+                <form action="/auth/signout" method="post">
+                  <button type="submit" className="text-xs text-[var(--danger)]">
+                    Out
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

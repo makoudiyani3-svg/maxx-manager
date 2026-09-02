@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
+import { createClient } from "@/lib/supabase/server";
+import { isEmailAllowed } from "@/lib/auth/allowlist";
 import "./globals.css";
 
 const sora = Sora({
@@ -27,11 +29,24 @@ export const metadata: Metadata = {
   description: "Sourcing maxx.ca → enrichissement IA → Shopify",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  let userEmail: string | null = null;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user && isEmailAllowed(user.email)) {
+      userEmail = user.email ?? null;
+    }
+  } catch {
+    userEmail = null;
+  }
+
   return (
     <html
       lang="fr"
@@ -39,7 +54,7 @@ export default function RootLayout({
     >
       <body className="min-h-full">
         <Suspense fallback={<div className="min-h-screen bg-[var(--bg)]" />}>
-          <AppShell>{children}</AppShell>
+          <AppShell userEmail={userEmail}>{children}</AppShell>
         </Suspense>
       </body>
     </html>
