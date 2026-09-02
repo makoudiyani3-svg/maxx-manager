@@ -169,6 +169,21 @@ const INVENTORY_ITEM_UPDATE = `
   }
 `;
 
+const VARIANTS_BULK_UPDATE = `
+  mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      productVariants {
+        id
+        price
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 function generateSku(productId: string): string {
   return `MAXX-${productId.slice(0, 8).toUpperCase()}`;
 }
@@ -426,6 +441,24 @@ export async function publishProductToShopify(
       });
     } catch (err) {
       console.warn("Could not set inventory item cost:", err);
+    }
+  }
+
+  // Refresh price / compare-at when variant already existed
+  if (shopifyVariantId && product.shopifyProductId) {
+    try {
+      await client.query(VARIANTS_BULK_UPDATE, {
+        productId: shopifyProductId,
+        variants: [
+          {
+            id: shopifyVariantId,
+            price,
+            ...(compareAtPrice ? { compareAtPrice } : {}),
+          },
+        ],
+      });
+    } catch (err) {
+      console.warn("Could not update variant price/compare-at:", err);
     }
   }
 

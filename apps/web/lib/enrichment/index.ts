@@ -5,7 +5,6 @@ import { runMarketAnalysis } from "@/lib/enrichment/market";
 import {
   findManufacturerImages,
   MIN_PRODUCT_IMAGES,
-  scrapeProductPageGallery,
 } from "@/lib/enrichment/manufacturerImages";
 import {
   verifyProductImages,
@@ -24,6 +23,7 @@ import type { CopywritingResult } from "@/lib/enrichment/copywriting";
 import type { MarketAnalysis } from "@/lib/enrichment/market";
 import { buildStorefrontDescriptionHtml } from "@/lib/listing/description";
 import { normalizeImageUrl } from "@/lib/enrichment/images";
+import { hydrateMaxxLotPage } from "@/lib/maxx/hydrate";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 
@@ -118,30 +118,95 @@ export async function enrichProduct(productId: string): Promise<void> {
   });
 
   try {
-    const lotPrice = product.rawPrice ? Number(product.rawPrice) : undefined;
     const warnings: string[] = [];
+    let rawTitle = product.rawTitle ?? "Product";
+    let rawDescription = product.rawDescription;
+    let lotPrice = product.rawPrice ? Number(product.rawPrice) : undefined;
+
+    const parsedEvent = parseMaxxEventFromUrl(product.sourceUrl);
+    let eventWeekKey = product.eventWeekKey ?? parsedEvent.eventWeekKey;
+    let eventId = product.eventId ?? parsedEvent.eventId;
+    let eventName = product.eventName;
+    let maxxRefs = (
+      (product.rawVariants as { maxxImageRefs?: string[] } | null)
+        ?.maxxImageRefs ?? []
+    ).map(normalizeImageUrl);
+
+    // Weak event / thin capture → re-fetch Maxx page for event + images + title
+    if (
+      isWeakEventWeekKey(eventWeekKey) ||
+      maxxRefs.length === 0 ||
+      !product.rawTitle ||
+      product.rawTitle.startsWith("Lot Maxx")
+    ) {
+      try {
+        const hydrated = await hydrateMaxxLotPage(product.sourceUrl);
+        if (hydrated.eventId) {
+          eventId = hydrated.eventId;
+          eventWeekKey =
+            hydrated.eventWeekKey ?? `maxx-event-${hydrated.eventId}`;
+        } else if (
+          hydrated.eventWeekKey &&
+          !isWeakEventWeekKey(hydrated.eventWeekKey)
+        ) {
+          eventWeekKey = hydrated.eventWeekKey;
+        }
+        if (hydrated.eventName) eventName = hydrated.eventName;
+        if (hydrated.images.length > 0) {
+          maxxRefs = [
+            ...new Set([
+              ...maxxRefs,
+              ...hydrated.images.map(normalizeImageUrl),
+            ]),
+          ].filter(Boolean);
+        }
+        if (
+          (!product.rawTitle || product.rawTitle.startsWith("Lot Maxx")) &&
+          hydrated.title
+        ) {
+          rawTitle = hydrated.title;
+        }
+        if (!rawDescription && hydrated.description) {
+          rawDescription = hydrated.description;
+        }
+        if (lotPrice == null && hydrated.price != null) {
+          lotPrice = hydrated.price;
+        }
+        warnings.push("Event/images Maxx re-hydratés depuis la page lot");
+      } catch (err) {
+        console.warn("Enrich Maxx hydrate failed:", err);
+      }
+    }
 
     // 1) Parse lot → single manufacturer product (name not translated)
     const identity = await parseLotToProduct({
-      rawTitle: product.rawTitle ?? "Product",
-      rawDescription: product.rawDescription,
+      rawTitle,
+      rawDescription,
       rawPrice: lotPrice,
     });
 
     const unitCost = identity.unitCost ?? lotPrice ?? undefined;
     const lotQuantity = Math.max(1, identity.lotQuantity || 1);
 
-    const parsedEvent = parseMaxxEventFromUrl(product.sourceUrl);
-    const eventWeekKey = product.eventWeekKey ?? parsedEvent.eventWeekKey;
-    const eventId = product.eventId ?? parsedEvent.eventId;
-
     // Persist lot qty + event early so week counts include this product
     await prisma.product.update({
       where: { id: productId },
       data: {
+        rawTitle,
+        ...(rawDescription != null ? { rawDescription } : {}),
+        ...(lotPrice != null ? { rawPrice: lotPrice } : {}),
         lotQuantity,
         eventWeekKey,
         eventId,
+        ...(eventName ? { eventName } : {}),
+        ...(maxxRefs.length > 0
+          ? {
+              rawVariants: {
+                ...((product.rawVariants as object) ?? {}),
+                maxxImageRefs: maxxRefs.slice(0, 12),
+              } as Prisma.InputJsonValue,
+            }
+          : {}),
       },
     });
 
@@ -162,15 +227,10 @@ export async function enrichProduct(productId: string): Promise<void> {
       `Event ${eventWeekKey} · transport ${WEEKLY_TRANSPORT_CAD}$ ÷ ${articlesInWeek} art. · premium enchère +${Math.round(AUCTION_PREMIUM_RATE * 100)}% · marge mini 100%`
     );
 
-    // 2) Exact product photos (not lot photos, not maxx)
+    // 2) Exact manufacturer photos (+ Maxx lot photos appended later)
     let rankedImages: ProductImageCandidate[] = [];
 
-    const rawVariants = product.rawVariants as {
-      maxxImageRefs?: string[];
-    } | null;
-    const maxxRefs = rawVariants?.maxxImageRefs ?? [];
-
-    // Lens on Maxx lot photo → official product pages (never publish Maxx URLs)
+    // Lens on Maxx lot photo → official product pages (Maxx URLs published only as tail)
     if (maxxRefs.length > 0 && process.env.SERPER_API_KEY) {
       try {
         const fromLotLens = await findImagesFromMaxxReference(maxxRefs, identity);
@@ -187,8 +247,8 @@ export async function enrichProduct(productId: string): Promise<void> {
 
     try {
       const found = await findManufacturerImages({
-        rawTitle: product.rawTitle ?? "Product",
-        rawDescription: product.rawDescription,
+        rawTitle,
+        rawDescription,
         rawPrice: lotPrice,
         minCount: MIN_PRODUCT_IMAGES,
         identity,
@@ -251,7 +311,7 @@ export async function enrichProduct(productId: string): Promise<void> {
         ];
         const extraPass = await findManufacturerImages({
           rawTitle: identity.manufacturerTitle,
-          rawDescription: product.rawDescription,
+          rawDescription,
           rawPrice: lotPrice,
           minCount: MIN_PRODUCT_IMAGES,
           identity: {
@@ -349,7 +409,7 @@ export async function enrichProduct(productId: string): Promise<void> {
       }
       copy = await generateCopywriting({
         manufacturerTitle: identity.manufacturerTitle,
-        rawDescription: product.rawDescription ?? undefined,
+        rawDescription: rawDescription ?? undefined,
         unitCost,
         lotQuantity: identity.lotQuantity,
         identity,
@@ -357,7 +417,7 @@ export async function enrichProduct(productId: string): Promise<void> {
     } catch (err) {
       console.warn("Copywriting fallback:", err);
       warnings.push("Description IA indisponible");
-      copy = fallbackCopy(identity.manufacturerTitle, product.rawDescription);
+      copy = fallbackCopy(identity.manufacturerTitle, rawDescription);
     }
 
     // Always force manufacturer title + merge bullets into HTML
@@ -433,6 +493,7 @@ export async function enrichProduct(productId: string): Promise<void> {
         lotQuantity,
         eventWeekKey,
         eventId,
+        ...(eventName ? { eventName } : {}),
         maxBidLot: deal.maxBidLot,
         maxBidUnit: deal.maxBidUnit,
         transportShare: deal.transportPerArticle,
