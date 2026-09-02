@@ -51,37 +51,59 @@ export function Countdown({
   );
 }
 
-function SyncOrdersButton() {
+function ShopifySyncButtons() {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"catalog" | "orders" | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
-  async function sync() {
-    setBusy(true);
+  async function run(
+    kind: "catalog" | "orders",
+    path: string,
+    format: (data: Record<string, unknown>) => string
+  ) {
+    setBusy(kind);
     setMsg(null);
     try {
-      const res = await fetch("/api/shopify/sync-orders", { method: "POST" });
+      const res = await fetch(path, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Sync failed");
-      setMsg(`Ventes sync: ${data.adjustedLines} lignes`);
+      setMsg(format(data));
       router.refresh();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Erreur sync");
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <button
-        type="button"
-        onClick={() => void sync()}
-        disabled={busy}
-        className="btn btn-secondary text-xs"
-      >
-        {busy ? "Sync…" : "Sync ventes Shopify"}
-      </button>
+      <div className="flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          onClick={() =>
+            void run("catalog", "/api/shopify/sync-catalog", (d) =>
+              `Catalogue: +${d.created ?? 0} · maj ${d.updated ?? 0}`
+            )
+          }
+          disabled={busy !== null}
+          className="btn btn-secondary text-xs"
+        >
+          {busy === "catalog" ? "Import…" : "Importer catalogue Shopify"}
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            void run("orders", "/api/shopify/sync-orders", (d) =>
+              `Ventes sync: ${d.adjustedLines ?? 0} lignes`
+            )
+          }
+          disabled={busy !== null}
+          className="btn btn-secondary text-xs"
+        >
+          {busy === "orders" ? "Sync…" : "Sync ventes Shopify"}
+        </button>
+      </div>
       {msg && <p className="text-[0.65rem] text-[var(--text-faint)]">{msg}</p>}
     </div>
   );
@@ -139,7 +161,7 @@ export function WarRoomHeader({
           )}
         </div>
         <div className="flex flex-col items-end gap-3 sm:flex-row sm:items-end">
-          <SyncOrdersButton />
+          <ShopifySyncButtons />
           {nearestEndsAt && (
             <div className="panel panel-glow px-5 py-3 text-right">
               <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">

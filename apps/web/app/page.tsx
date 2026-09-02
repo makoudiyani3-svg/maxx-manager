@@ -32,29 +32,40 @@ export default async function DashboardPage({
     ...(bid ? { bidStatus: bid } : {}),
   };
 
-  const [products, counts, total, eventGroups, bidCounts] = await Promise.all([
-    prisma.product.findMany({
-      where,
-      include: {
-        images: {
-          where: { isSelected: true },
-          orderBy: { position: "asc" },
-          take: 1,
+  const [products, counts, total, eventGroups, bidCounts, inventoryAgg] =
+    await Promise.all([
+      prisma.product.findMany({
+        where,
+        include: {
+          images: {
+            where: { isSelected: true },
+            orderBy: { position: "asc" },
+            take: 1,
+          },
         },
-      },
-      orderBy: [{ auctionEndsAt: "asc" }, { createdAt: "desc" }],
-    }),
-    prisma.product.groupBy({ by: ["status"], _count: true }),
-    prisma.product.count(),
-    prisma.product.groupBy({
-      by: ["eventWeekKey"],
-      _count: true,
-      where: { eventWeekKey: { not: null } },
-      orderBy: { _count: { eventWeekKey: "desc" } },
-      take: 12,
-    }),
-    prisma.product.groupBy({ by: ["bidStatus"], _count: true }),
-  ]);
+        orderBy: [{ auctionEndsAt: "asc" }, { createdAt: "desc" }],
+      }),
+      prisma.product.groupBy({ by: ["status"], _count: true }),
+      prisma.product.count(),
+      prisma.product.groupBy({
+        by: ["eventWeekKey"],
+        _count: true,
+        where: { eventWeekKey: { not: null } },
+        orderBy: { _count: { eventWeekKey: "desc" } },
+        take: 12,
+      }),
+      prisma.product.groupBy({ by: ["bidStatus"], _count: true }),
+      // Global inventory KPIs (includes Shopify imports with no Maxx event)
+      prisma.product.findMany({
+        select: {
+          stockQty: true,
+          lowStockThreshold: true,
+          assignedTo: true,
+          status: true,
+          bidStatus: true,
+        },
+      }),
+    ]);
 
   const countMap = Object.fromEntries(counts.map((c) => [c.status, c._count]));
   const bidCountMap = Object.fromEntries(
@@ -169,14 +180,14 @@ export default async function DashboardPage({
           capitalExposed,
           transportPerArticle:
             activeArticles > 0 ? WEEKLY_TRANSPORT_CAD / activeArticles : null,
-          unitsInStock: weekProducts.reduce((s, p) => s + (p.stockQty ?? 0), 0),
-          lowStock: weekProducts.filter(
+          unitsInStock: inventoryAgg.reduce((s, p) => s + (p.stockQty ?? 0), 0),
+          lowStock: inventoryAgg.filter(
             (p) =>
               !["lost", "skipped"].includes(p.bidStatus) &&
               (p.stockQty ?? 0) <= (p.lowStockThreshold ?? 1) &&
               ["ready", "active", "error"].includes(p.status)
           ).length,
-          unassigned: weekProducts.filter(
+          unassigned: inventoryAgg.filter(
             (p) =>
               !p.assignedTo &&
               (p.status === "ready" || p.status === "active")
