@@ -125,7 +125,8 @@ export function ProductDetailClient({ product }: { product: Product }) {
   }, [product.images, selectedImages]);
 
   const isErrorMsg = Boolean(
-    message && (message.includes("Erreur") || message.includes("Échec"))
+    message &&
+      /erreur|échec|invalid|fail|refus/i.test(message)
   );
 
   function toggleImage(id: string) {
@@ -142,17 +143,21 @@ export function ProductDetailClient({ product }: { product: Product }) {
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
+    const parsedPrice = price.trim() === "" ? null : Number(price);
+    if (parsedPrice != null && !Number.isFinite(parsedPrice)) {
+      throw new Error("Prix invalide");
+    }
     const res = await fetch(`/api/products/${product.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title,
         descriptionHtml: description,
-        suggestedPrice: parseFloat(price),
+        ...(parsedPrice != null ? { suggestedPrice: parsedPrice } : {}),
         selectedImageIds: Array.from(selectedImages),
         tags,
-        seoTitle: seoTitle.trim() || null,
-        seoDescription: seoDescription.trim() || null,
+        seoTitle: seoTitle.trim().slice(0, 120) || null,
+        seoDescription: seoDescription.trim().slice(0, 320) || null,
         ...(opts?.syncShopifyContent ? { syncShopifyContent: true } : {}),
       }),
     });
@@ -242,7 +247,22 @@ export function ProductDetailClient({ product }: { product: Product }) {
     setPublishing(true);
     setMessage(null);
     try {
-      await saveProduct();
+      // Persist title/price/images first (publish API reads from DB)
+      try {
+        await saveProduct();
+      } catch (saveErr) {
+        const fallbackPrice =
+          (price.trim() !== "" && Number(price) > 0) ||
+          (product.suggestedPrice != null && Number(product.suggestedPrice) > 0);
+        if (!fallbackPrice) {
+          throw saveErr instanceof Error
+            ? saveErr
+            : new Error("Échec sauvegarde avant publish");
+        }
+        // Keep going — DB may already have a valid price
+        console.warn("Save before publish failed:", saveErr);
+      }
+
       const res = await fetch(`/api/publish/${product.id}`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Échec de la publication");

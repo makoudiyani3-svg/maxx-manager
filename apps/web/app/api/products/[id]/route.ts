@@ -14,11 +14,21 @@ import { requireDashboardUser } from "@/lib/auth/session";
 const updateSchema = z.object({
   title: z.string().optional(),
   descriptionHtml: z.string().optional(),
-  suggestedPrice: z.number().optional(),
+  suggestedPrice: z.preprocess((value) => {
+    if (value === null || value === undefined || value === "") return undefined;
+    if (typeof value === "number" && Number.isNaN(value)) return undefined;
+    return value;
+  }, z.number().finite().nonnegative().optional()),
   tags: z.array(z.string()).optional(),
-  seoTitle: z.string().max(120).nullable().optional(),
-  seoDescription: z.string().max(320).nullable().optional(),
-  selectedImageIds: z.array(z.string().uuid()).optional(),
+  seoTitle: z.preprocess((value) => {
+    if (value == null) return value;
+    return String(value).slice(0, 120);
+  }, z.string().nullable().optional()),
+  seoDescription: z.preprocess((value) => {
+    if (value == null) return value;
+    return String(value).slice(0, 320);
+  }, z.string().nullable().optional()),
+  selectedImageIds: z.array(z.string().min(1)).optional(),
   bidStatus: z
     .enum(["watching", "capped", "published", "won", "lost", "skipped"])
     .optional(),
@@ -249,8 +259,15 @@ export async function PATCH(
     return Response.json({ ...product, inventorySync, shopifyContentSync });
   } catch (error) {
     if (error instanceof z.ZodError) {
+      const detail = error.issues
+        .map((i) => `${i.path.join(".") || "body"}: ${i.message}`)
+        .slice(0, 3)
+        .join(" · ");
       return Response.json(
-        { error: "Invalid payload", details: error.issues },
+        {
+          error: detail ? `Invalid payload — ${detail}` : "Invalid payload",
+          details: error.issues,
+        },
         { status: 400 }
       );
     }
