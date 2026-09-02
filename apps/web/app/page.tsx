@@ -78,6 +78,9 @@ export default async function DashboardPage({
           eventName: true,
           status: true,
           shopifyProductId: true,
+          stockQty: true,
+          lowStockThreshold: true,
+          assignedTo: true,
         },
       })
     : products.map((p) => ({
@@ -88,6 +91,9 @@ export default async function DashboardPage({
         eventName: p.eventName,
         status: p.status,
         shopifyProductId: p.shopifyProductId,
+        stockQty: p.stockQty,
+        lowStockThreshold: p.lowStockThreshold,
+        assignedTo: p.assignedTo,
       }));
 
   const exposedStatuses = new Set(["watching", "capped", "published", "won"]);
@@ -126,6 +132,9 @@ export default async function DashboardPage({
     sourceSite: p.sourceSite,
     createdAt: p.createdAt.toISOString(),
     imageUrl: p.images[0]?.url ?? null,
+    stockQty: p.stockQty,
+    lowStockThreshold: p.lowStockThreshold,
+    assignedTo: p.assignedTo,
   }));
 
   function hrefWith(params: Record<string, string | undefined>) {
@@ -160,6 +169,18 @@ export default async function DashboardPage({
           capitalExposed,
           transportPerArticle:
             activeArticles > 0 ? WEEKLY_TRANSPORT_CAD / activeArticles : null,
+          unitsInStock: weekProducts.reduce((s, p) => s + (p.stockQty ?? 0), 0),
+          lowStock: weekProducts.filter(
+            (p) =>
+              !["lost", "skipped"].includes(p.bidStatus) &&
+              (p.stockQty ?? 0) <= (p.lowStockThreshold ?? 1) &&
+              ["ready", "active", "error"].includes(p.status)
+          ).length,
+          unassigned: weekProducts.filter(
+            (p) =>
+              !p.assignedTo &&
+              (p.status === "ready" || p.status === "active")
+          ).length,
         }}
       />
 

@@ -44,6 +44,15 @@ model Product {
   transportShare   Decimal?       @map("transport_share") @db.Decimal(10, 2)
   dealMath         Json?          @map("deal_math")
 
+  /// Available sellable units (source of truth in Maxx Manager)
+  stockQty           Int       @default(0) @map("stock_qty")
+  lowStockThreshold  Int       @default(1) @map("low_stock_threshold")
+  /// Real auction cost when won (lot total before premium/transport split)
+  actualCostLot      Decimal?  @map("actual_cost_lot") @db.Decimal(10, 2)
+  actualCostUnit     Decimal?  @map("actual_cost_unit") @db.Decimal(10, 2)
+  assignedTo         String?   @map("assigned_to")
+  internalNotes      String?   @map("internal_notes") @db.Text
+
   shopifyProductId       String?   @map("shopify_product_id")
   shopifyVariantId       String?   @map("shopify_variant_id")
   shopifyInventoryItemId String?   @map("shopify_inventory_item_id")
@@ -55,10 +64,13 @@ model Product {
   updatedAt        DateTime       @updatedAt @map("updated_at")
 
   images           ProductImage[]
+  movements        InventoryMovement[]
 
   @@index([status])
   @@index([eventWeekKey])
   @@index([bidStatus])
+  @@index([stockQty])
+  @@index([assignedTo])
   @@map("products")
 }
 
@@ -77,6 +89,27 @@ model ProductImage {
 
   @@index([productId])
   @@map("product_images")
+}
+
+/// Stock ledger — no location concept (single pool)
+model InventoryMovement {
+  id             String   @id @default(uuid()) @db.Uuid
+  productId      String   @map("product_id") @db.Uuid
+  delta          Int
+  quantityAfter  Int      @map("quantity_after")
+  /// receive | adjust | sale | win | publish | return | damage | other
+  reason         String
+  note           String?
+  createdBy      String?  @map("created_by")
+  shopifyOrderId String?  @map("shopify_order_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([shopifyOrderId])
+  @@index([createdAt])
+  @@map("inventory_movements")
 }
 
 enum ProductStatus {

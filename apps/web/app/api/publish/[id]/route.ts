@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { publishProductToShopify } from "@/lib/shopify/publish";
+import { adjustInventory } from "@/lib/inventory/adjust";
 
 export const maxDuration = 60;
 
@@ -21,14 +22,19 @@ export async function POST(
 
   if (product.status !== "ready" && product.status !== "error") {
     return Response.json(
-      { error: `Product is not ready for publishing (status: ${product.status})` },
+      {
+        error: `Product is not ready for publishing (status: ${product.status})`,
+      },
       { status: 400 }
     );
   }
 
   if (product.shopifyProductId) {
     return Response.json(
-      { error: "Product already published", shopifyProductId: product.shopifyProductId },
+      {
+        error: "Product already published",
+        shopifyProductId: product.shopifyProductId,
+      },
       { status: 409 }
     );
   }
@@ -51,6 +57,14 @@ export async function POST(
         shopifyStatus: "ACTIVE",
         bidStatus: "published",
       },
+    });
+
+    await adjustInventory({
+      productId: id,
+      quantity: 0,
+      reason: "publish",
+      note: "Published pre-win stock 0",
+      syncShopify: false,
     });
 
     return Response.json({

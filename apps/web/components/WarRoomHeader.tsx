@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 function formatCountdown(ms: number): string {
   if (ms <= 0) return "Terminé";
@@ -50,6 +51,42 @@ export function Countdown({
   );
 }
 
+function SyncOrdersButton() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function sync() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/shopify/sync-orders", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Sync failed");
+      setMsg(`Ventes sync: ${data.adjustedLines} lignes`);
+      router.refresh();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Erreur sync");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={() => void sync()}
+        disabled={busy}
+        className="btn btn-secondary text-xs"
+      >
+        {busy ? "Sync…" : "Sync ventes Shopify"}
+      </button>
+      {msg && <p className="text-[0.65rem] text-[var(--text-faint)]">{msg}</p>}
+    </div>
+  );
+}
+
 export function WarRoomHeader({
   eventKey,
   eventName,
@@ -67,6 +104,9 @@ export function WarRoomHeader({
     lost: number;
     capitalExposed: number;
     transportPerArticle: number | null;
+    unitsInStock: number;
+    lowStock: number;
+    unassigned: number;
   };
 }) {
   const label = eventName ?? (eventKey ? eventKey.replace(/^maxx-/, "") : null);
@@ -76,7 +116,7 @@ export function WarRoomHeader({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-faint)]">
-            Centre de commande
+            Gestion inventaire
           </p>
           <h1 className="font-display mt-1 text-3xl font-bold tracking-tight sm:text-4xl">
             War Room
@@ -94,21 +134,24 @@ export function WarRoomHeader({
             </p>
           ) : (
             <p className="mt-2 max-w-xl text-sm text-[var(--text-muted)]">
-              Sniper → max bid → publish stock 0 → won = activer stock.
+              Sourcer → enrichir → publier → stock → ventes. Pool inventaire unique.
             </p>
           )}
         </div>
-        {nearestEndsAt && (
-          <div className="panel panel-glow px-5 py-3 text-right">
-            <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-              Prochaine fin
-            </p>
-            <Countdown endsAt={nearestEndsAt} className="text-2xl font-bold" />
-          </div>
-        )}
+        <div className="flex flex-col items-end gap-3 sm:flex-row sm:items-end">
+          <SyncOrdersButton />
+          {nearestEndsAt && (
+            <div className="panel panel-glow px-5 py-3 text-right">
+              <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+                Prochaine fin
+              </p>
+              <Countdown endsAt={nearestEndsAt} className="text-2xl font-bold" />
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-9">
         {[
           { label: "Lots", value: String(kpis.total), hint: "snipés" },
           {
@@ -117,26 +160,31 @@ export function WarRoomHeader({
             hint: "à publier",
             accent: true,
           },
-          {
-            label: "Publiés",
-            value: String(kpis.published),
-            hint: "stock 0",
-          },
-          { label: "Won", value: String(kpis.won), hint: "à activer", success: true },
+          { label: "Publiés", value: String(kpis.published), hint: "live" },
+          { label: "Won", value: String(kpis.won), hint: "gagnés", success: true },
           { label: "Lost", value: String(kpis.lost), hint: "passés" },
+          {
+            label: "Stock",
+            value: String(kpis.unitsInStock),
+            hint: "unités",
+            success: true,
+          },
+          {
+            label: "Bas",
+            value: String(kpis.lowStock),
+            hint: "alertes",
+            danger: kpis.lowStock > 0,
+          },
+          {
+            label: "À assigner",
+            value: String(kpis.unassigned),
+            hint: "ready/active",
+          },
           {
             label: "Capital",
             value: `${kpis.capitalExposed.toFixed(0)} $`,
-            hint: "max bids exposés",
+            hint: "max bids",
             warning: true,
-          },
-          {
-            label: "Transport",
-            value:
-              kpis.transportPerArticle != null
-                ? `${kpis.transportPerArticle.toFixed(0)} $`
-                : "—",
-            hint: "par article",
           },
         ].map((stat) => (
           <div key={stat.label} className="panel panel-glow p-3 sm:p-4">
@@ -151,7 +199,9 @@ export function WarRoomHeader({
                     ? "text-[var(--success)]"
                     : stat.warning
                       ? "text-[var(--warning)]"
-                      : ""
+                      : stat.danger
+                        ? "text-[var(--danger)]"
+                        : ""
               }`}
             >
               {stat.value}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Countdown } from "@/components/WarRoomHeader";
+import { InventoryPanel } from "@/components/InventoryPanel";
 
 const SHOPIFY_STORE_SLUG = "3efvmm-mp";
 
@@ -72,9 +73,24 @@ interface Product {
   maxBidUnit: string | null;
   transportShare: string | null;
   dealMath: MarketAnalysis["deal"] | null;
+  stockQty?: number;
+  lowStockThreshold?: number;
+  assignedTo?: string | null;
+  internalNotes?: string | null;
+  actualCostLot?: string | number | null;
+  actualCostUnit?: string | number | null;
+  movements?: Array<{
+    id: string;
+    delta: number;
+    quantityAfter: number;
+    reason: string;
+    note: string | null;
+    createdBy: string | null;
+    createdAt: string;
+  }>;
 }
 
-type Tab = "edit" | "preview" | "market" | "images";
+type Tab = "edit" | "preview" | "market" | "inventory" | "images";
 
 export function ProductDetailClient({ product }: { product: Product }) {
   const router = useRouter();
@@ -219,6 +235,10 @@ export function ProductDetailClient({ product }: { product: Product }) {
     { id: "edit", label: "Édition" },
     { id: "preview", label: "Aperçu" },
     { id: "market", label: "Marché" },
+    {
+      id: "inventory",
+      label: `Stock (${product.stockQty ?? 0})`,
+    },
     { id: "images", label: `Images (${selectedImages.size})` },
   ];
 
@@ -689,6 +709,41 @@ export function ProductDetailClient({ product }: { product: Product }) {
                 </p>
               )}
             </section>
+          )}
+
+          {tab === "inventory" && (
+            <InventoryPanel
+              productId={product.id}
+              stockQty={product.stockQty ?? 0}
+              lowStockThreshold={product.lowStockThreshold ?? 1}
+              assignedTo={product.assignedTo ?? null}
+              internalNotes={product.internalNotes ?? null}
+              actualCostLot={
+                product.actualCostLot != null
+                  ? Number(product.actualCostLot)
+                  : null
+              }
+              actualCostUnit={
+                product.actualCostUnit != null
+                  ? Number(product.actualCostUnit)
+                  : null
+              }
+              costPrice={
+                product.costPrice != null ? Number(product.costPrice) : null
+              }
+              suggestedPrice={
+                product.suggestedPrice != null
+                  ? Number(product.suggestedPrice)
+                  : null
+              }
+              movements={(product.movements ?? []).map((m) => ({
+                ...m,
+                createdAt:
+                  typeof m.createdAt === "string"
+                    ? m.createdAt
+                    : new Date(m.createdAt).toISOString(),
+              }))}
+            />
           )}
 
           {tab === "images" && (

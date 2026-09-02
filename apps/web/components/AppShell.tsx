@@ -130,9 +130,9 @@ export function AppShell({
             </div>
           )}
           <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
-            <p className="text-xs font-semibold text-[var(--text)]">Ops enchères</p>
+            <p className="text-xs font-semibold text-[var(--text)]">Inventaire</p>
             <p className="mt-1 text-[0.7rem] leading-relaxed text-[var(--text-faint)]">
-              Publish avant win (stock 0). Marque Won → stock Shopify = qty lot.
+              Pool unique · publish stock 0 · won = qty · sync ventes Shopify.
             </p>
           </div>
         </div>

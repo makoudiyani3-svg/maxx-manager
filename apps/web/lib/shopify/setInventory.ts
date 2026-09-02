@@ -43,7 +43,6 @@ export interface InventorySyncResult {
   quantity: number;
   inventoryItemId: string;
   variantId: string;
-  locationId: string;
 }
 
 async function resolveLocationId(): Promise<string> {
@@ -129,5 +128,5 @@ export async function setShopifyInventory(
     );
   }
 
-  return { quantity: qty, inventoryItemId, variantId, locationId };
+  return { quantity: qty, inventoryItemId, variantId };
 }

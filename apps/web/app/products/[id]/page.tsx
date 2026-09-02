@@ -13,7 +13,10 @@ export default async function ProductPage({
 
   const product = await prisma.product.findUnique({
     where: { id },
-    include: { images: { orderBy: { position: "asc" } } },
+    include: {
+      images: { orderBy: { position: "asc" } },
+      movements: { orderBy: { createdAt: "desc" }, take: 30 },
+    },
   });
 
   if (!product) {

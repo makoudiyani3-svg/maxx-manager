@@ -16,6 +16,9 @@ interface ListProduct extends RowProduct {
   sourceSite: string;
   createdAt: string;
   imageUrl: string | null;
+  stockQty?: number;
+  lowStockThreshold?: number;
+  assignedTo?: string | null;
 }
 
 function formatPrice(value: unknown) {
@@ -219,6 +222,20 @@ export function ProductPipelineList({ products }: { products: ListProduct[] }) {
                     <span className="capitalize text-[var(--text-faint)]">
                       {product.bidStatus}
                     </span>
+                    <span
+                      className={
+                        (product.stockQty ?? 0) <= (product.lowStockThreshold ?? 1)
+                          ? "text-[var(--danger)]"
+                          : "text-[var(--success)]"
+                      }
+                    >
+                      Stock {product.stockQty ?? 0}
+                    </span>
+                    {product.assignedTo && (
+                      <span className="truncate text-[var(--text-faint)]">
+                        @{product.assignedTo.split("@")[0]}
+                      </span>
+                    )}
                     {product.eventWeekKey && (
                       <span className="hidden text-[var(--text-faint)] md:inline">
                         {product.eventWeekKey.replace(/^maxx-/, "")}
