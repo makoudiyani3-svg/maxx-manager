@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { STATUS_FILTERS } from "@/components/StatusBadge";
 import { WarRoomHeader } from "@/components/WarRoomHeader";
 import { ProductPipelineList } from "@/components/ProductPipelineList";
-import { InventoryAlertsPanel } from "@/components/InventoryAlertsPanel";
 import type { ProductStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -242,8 +241,6 @@ export default async function DashboardPage({
           ).length,
         }}
       />
-
-      <InventoryAlertsPanel focus={alertFocus} />
 
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         {/* Pipeline rail — Maisone "Rooms" style */}

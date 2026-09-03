@@ -9,7 +9,6 @@ const NAV = [
   { href: "/?status=ready", label: "Prêts", match: "status=ready" },
   { href: "/?bid=published", label: "Publiés", match: "bid=published" },
   { href: "/?bid=won", label: "Won", match: "bid=won" },
-  { href: "/?alert=low", label: "Alertes", match: "alert=low" },
 ];
 
 function ShopifyHealthDot() {
