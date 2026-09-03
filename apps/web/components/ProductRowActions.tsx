@@ -119,6 +119,32 @@ export function ProductRowActions({
     }
   }
 
+  async function removeFromManager() {
+    if (
+      !window.confirm(
+        product.shopifyProductId
+          ? "Supprimer de Maxx Manager et de la boutique Shopify ? Irréversible."
+          : "Supprimer ce produit de Maxx Manager ? Irréversible."
+      )
+    ) {
+      return;
+    }
+    setBusy("wipe");
+    try {
+      const res = await fetch(`/api/products/${product.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Suppression échouée");
+      setMsg("Supprimé");
+      startTransition(() => router.refresh());
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Erreur suppression");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const adminUrl = product.shopifyProductId
     ? shopifyAdminUrl(product.shopifyProductId)
     : null;
@@ -227,6 +253,14 @@ export function ProductRowActions({
             {busy === "delete" ? "…" : "Retirer boutique"}
           </button>
         )}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => void removeFromManager()}
+          className="rounded-full bg-[rgba(229,72,77,0.12)] px-3 py-1 text-[0.65rem] font-bold text-[var(--danger)]"
+        >
+          {busy === "wipe" ? "…" : "Supprimer"}
+        </button>
       </div>
 
       {msg && (

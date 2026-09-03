@@ -244,3 +244,45 @@ export async function GET(
 
   return Response.json(product);
 }
+
+/** Delete from Maxx Manager; also remove from Shopify if still linked. */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireDashboardUser();
+  if (!auth.ok) return auth.response;
+
+  const { id } = await params;
+  const product = await prisma.product.findUnique({ where: { id } });
+  if (!product) {
+    return Response.json({ error: "Product not found" }, { status: 404 });
+  }
+
+  let shopifyDeleted = false;
+  let shopifyWarning: string | null = null;
+
+  if (product.shopifyProductId) {
+    try {
+      const { deleteShopifyProduct } = await import(
+        "@/lib/shopify/deleteProduct"
+      );
+      await deleteShopifyProduct(product.shopifyProductId);
+      shopifyDeleted = true;
+    } catch (err) {
+      // Continue — product may already be gone from Shopify
+      shopifyWarning =
+        err instanceof Error ? err.message : "Shopify delete failed";
+      console.warn("Shopify delete during product wipe:", shopifyWarning);
+    }
+  }
+
+  await prisma.product.delete({ where: { id } });
+
+  return Response.json({
+    success: true,
+    productId: id,
+    shopifyDeleted,
+    shopifyWarning,
+  });
+}

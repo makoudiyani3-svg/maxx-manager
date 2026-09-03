@@ -283,6 +283,32 @@ export function ProductDetailClient({ product }: { product: Product }) {
     }
   }
 
+  async function handleRemoveFromManager() {
+    if (
+      !window.confirm(
+        product.shopifyProductId
+          ? "Supprimer de Maxx Manager et de la boutique Shopify ? Irréversible."
+          : "Supprimer ce produit de Maxx Manager ? Irréversible."
+      )
+    ) {
+      return;
+    }
+    setShopifyBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/products/${product.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Suppression échouée");
+      router.push("/");
+      router.refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Erreur suppression");
+      setShopifyBusy(false);
+    }
+  }
+
   async function setBidStatus(status: string) {
     setMessage(null);
     try {
@@ -426,6 +452,14 @@ export function ProductDetailClient({ product }: { product: Product }) {
               {shopifyBusy ? "…" : "Retirer de la boutique"}
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => void handleRemoveFromManager()}
+            disabled={shopifyBusy}
+            className="btn btn-danger"
+          >
+            Supprimer de Maxx Manager
+          </button>
           {canPublish && (
             <button
               onClick={handlePublish}
