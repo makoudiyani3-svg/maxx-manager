@@ -5,12 +5,11 @@ import { WarRoomHeader } from "@/components/WarRoomHeader";
 import { ProductPipelineList } from "@/components/ProductPipelineList";
 import { InventoryAlertsPanel } from "@/components/InventoryAlertsPanel";
 import type { ProductStatus } from "@prisma/client";
-import { WEEKLY_TRANSPORT_CAD } from "@/lib/enrichment/pricing";
 
 export const dynamic = "force-dynamic";
 
 const BID_FILTERS = [
-  { value: "", label: "Toutes enchères", key: "bid-all" },
+  { value: "", label: "Toutes", key: "bid-all" },
   { value: "watching", label: "Watching", key: "watching" },
   { value: "capped", label: "Capped", key: "capped" },
   { value: "published", label: "Publiés", key: "published" },
@@ -92,7 +91,6 @@ export default async function DashboardPage({
         where: { eventWeekKey: activeEventKey },
         select: {
           bidStatus: true,
-          maxBidLot: true,
           lotQuantity: true,
           auctionEndsAt: true,
           eventName: true,
@@ -105,7 +103,6 @@ export default async function DashboardPage({
       })
     : products.map((p) => ({
         bidStatus: p.bidStatus,
-        maxBidLot: p.maxBidLot,
         lotQuantity: p.lotQuantity,
         auctionEndsAt: p.auctionEndsAt,
         eventName: p.eventName,
@@ -115,15 +112,6 @@ export default async function DashboardPage({
         lowStockThreshold: p.lowStockThreshold,
         assignedTo: p.assignedTo,
       }));
-
-  const exposedStatuses = new Set(["watching", "capped", "published", "won"]);
-  const capitalExposed = weekProducts
-    .filter((p) => exposedStatuses.has(p.bidStatus) && p.maxBidLot != null)
-    .reduce((sum, p) => sum + Number(p.maxBidLot), 0);
-
-  const activeArticles = weekProducts
-    .filter((p) => !["lost", "skipped"].includes(p.bidStatus))
-    .reduce((sum, p) => sum + Math.max(1, p.lotQuantity || 1), 0);
 
   const nearestEndsAt =
     weekProducts
@@ -147,7 +135,6 @@ export default async function DashboardPage({
     rawTitle: p.rawTitle,
     suggestedPrice: p.suggestedPrice != null ? Number(p.suggestedPrice) : null,
     costPrice: p.costPrice != null ? Number(p.costPrice) : null,
-    maxBidLot: p.maxBidLot != null ? Number(p.maxBidLot) : null,
     eventWeekKey: p.eventWeekKey,
     sourceSite: p.sourceSite,
     createdAt: p.createdAt.toISOString(),
@@ -170,6 +157,26 @@ export default async function DashboardPage({
     );
   }
 
+  const featuredSource =
+    listProducts.find((p) => p.status === "ready" && p.imageUrl) ??
+    listProducts.find((p) => p.imageUrl) ??
+    listProducts[0] ??
+    null;
+
+  const featured = featuredSource
+    ? {
+        id: featuredSource.id,
+        title:
+          featuredSource.title ?? featuredSource.rawTitle ?? "Produit Maxx",
+        imageUrl: featuredSource.imageUrl,
+        price:
+          featuredSource.suggestedPrice != null
+            ? `${Number(featuredSource.suggestedPrice).toFixed(2)} $`
+            : null,
+        status: featuredSource.status,
+      }
+    : null;
+
   function hrefWith(params: Record<string, string | undefined>) {
     const sp = new URLSearchParams();
     const merged = {
@@ -186,13 +193,33 @@ export default async function DashboardPage({
     return q ? `/?${q}` : "/";
   }
 
+  const pipelineItems = [
+    {
+      label: "Tous",
+      href: hrefWith({ status: undefined, bid: undefined, alert: undefined }),
+      count: total,
+      active: !filterStatus && !bid && !alertFocus,
+    },
+    ...STATUS_FILTERS.filter((f) => f.value).map((filter) => ({
+      label: filter.label,
+      href: hrefWith({
+        status: filter.value || undefined,
+        bid: undefined,
+        alert: undefined,
+      }),
+      count: countMap[filter.value as ProductStatus] ?? 0,
+      active: (filterStatus ?? "") === filter.value,
+    })),
+  ];
+
   return (
-    <div className="fade-in space-y-8">
+    <div className="fade-in flex flex-col gap-6">
       <WarRoomHeader
         eventKey={activeEventKey}
         eventName={eventName}
         nearestEndsAt={nearestEndsAt?.toISOString() ?? null}
         activeAlert={alertFocus}
+        featured={featured}
         kpis={{
           total: weekProducts.length || total,
           ready: weekProducts.filter((p) => p.status === "ready").length,
@@ -201,9 +228,6 @@ export default async function DashboardPage({
           ).length,
           won: weekProducts.filter((p) => p.bidStatus === "won").length,
           lost: weekProducts.filter((p) => p.bidStatus === "lost").length,
-          capitalExposed,
-          transportPerArticle:
-            activeArticles > 0 ? WEEKLY_TRANSPORT_CAD / activeArticles : null,
           unitsInStock: inventoryAgg.reduce((s, p) => s + (p.stockQty ?? 0), 0),
           lowStock: inventoryAgg.filter(
             (p) =>
@@ -221,90 +245,106 @@ export default async function DashboardPage({
 
       <InventoryAlertsPanel focus={alertFocus} />
 
-      <div className="flex flex-wrap gap-2">
-        {STATUS_FILTERS.map((filter) => {
-          const count =
-            filter.value === ""
-              ? total
-              : (countMap[filter.value as ProductStatus] ?? 0);
-          const isActive = (filterStatus ?? "") === filter.value;
-          return (
+      <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+        {/* Pipeline rail — Maisone "Rooms" style */}
+        <aside className="bento flex flex-col gap-2 p-3">
+          <p className="px-3 pb-1 pt-2 text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+            Statuts
+          </p>
+          {pipelineItems.map((item) => (
             <Link
-              key={filter.key}
-              href={hrefWith({
-                status: filter.value || undefined,
-                alert: undefined,
-              })}
-              className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                isActive
-                  ? "bg-[var(--accent)] text-[#0a0c0b]"
-                  : "border border-[var(--border)] bg-[var(--bg-panel)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text)]"
+              key={item.label}
+              href={item.href}
+              className={`flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                item.active
+                  ? "bg-[var(--accent)] text-white"
+                  : "text-[var(--text-muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]"
               }`}
             >
-              {filter.label}
-              <span className={`ml-1.5 ${isActive ? "opacity-70" : "opacity-50"}`}>
-                {count}
+              <span>{item.label}</span>
+              <span className={item.active ? "opacity-70" : "opacity-50"}>
+                {item.count}
               </span>
             </Link>
-          );
-        })}
-      </div>
+          ))}
 
-      <div className="flex flex-wrap gap-2">
-        <span className="self-center text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">
-          Enchères
-        </span>
-        {BID_FILTERS.map((filter) => {
-          const count =
-            filter.value === "" ? total : (bidCountMap[filter.value] ?? 0);
-          const isActive = (bid ?? "") === filter.value;
-          return (
-            <Link
-              key={filter.key}
-              href={hrefWith({
-                bid: filter.value || undefined,
-                alert: undefined,
-              })}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                isActive
-                  ? "bg-[var(--warning)] text-[#0a0c0b]"
-                  : "border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
-              }`}
-            >
-              {filter.label}
-              <span className="ml-1 opacity-60">{count}</span>
-            </Link>
-          );
-        })}
-      </div>
-
-      {eventGroups.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <span className="self-center text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">
-            Events
-          </span>
-          {eventGroups.map((g) => {
-            const key = g.eventWeekKey!;
-            const isActive = event === key || (!event && key === activeEventKey);
+          <p className="px-3 pb-1 pt-4 text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+            Enchères
+          </p>
+          {BID_FILTERS.map((filter) => {
+            const count =
+              filter.value === "" ? total : (bidCountMap[filter.value] ?? 0);
+            const isActive = (bid ?? "") === filter.value;
             return (
               <Link
-                key={key}
-                href={hrefWith({ event: key })}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                key={filter.key}
+                href={hrefWith({
+                  bid: filter.value || undefined,
+                  alert: undefined,
+                })}
+                className={`flex items-center justify-between rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
                   isActive
-                    ? "bg-[var(--info)] text-[#0a0c0b]"
-                    : "border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--text-muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]"
                 }`}
               >
-                {key.replace(/^maxx-/, "")}
-                <span className="ml-1 opacity-60">{g._count}</span>
+                <span>{filter.label}</span>
+                <span className={isActive ? "opacity-70" : "opacity-50"}>
+                  {count}
+                </span>
               </Link>
             );
           })}
-        </div>
-      )}
 
-      <ProductPipelineList products={listProducts} />
+          {eventGroups.length > 0 && (
+            <>
+              <p className="px-3 pb-1 pt-4 text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+                Events
+              </p>
+              {eventGroups.map((g) => {
+                const key = g.eventWeekKey!;
+                const isActive =
+                  event === key || (!event && key === activeEventKey);
+                return (
+                  <Link
+                    key={key}
+                    href={hrefWith({ event: key })}
+                    className={`flex items-center justify-between rounded-2xl px-4 py-2.5 text-xs font-medium transition ${
+                      isActive
+                        ? "bg-[var(--accent)] text-white"
+                        : "text-[var(--text-muted)] hover:bg-[var(--bg)]"
+                    }`}
+                  >
+                    <span className="truncate">{key.replace(/^maxx-/, "")}</span>
+                    <span className="opacity-60">{g._count}</span>
+                  </Link>
+                );
+              })}
+            </>
+          )}
+
+          <Link
+            href="/?status=ready"
+            className="btn btn-primary mt-3 w-full"
+          >
+            Publier les prêts
+          </Link>
+        </aside>
+
+        <div className="min-w-0">
+          <div className="mb-4 flex items-end justify-between gap-3">
+            <div>
+              <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+                Collection
+              </p>
+              <h2 className="font-display text-2xl font-bold tracking-tight">
+                {listProducts.length} produit{listProducts.length === 1 ? "" : "s"}
+              </h2>
+            </div>
+          </div>
+          <ProductPipelineList products={listProducts} />
+        </div>
+      </div>
     </div>
   );
 }

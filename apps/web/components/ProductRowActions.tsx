@@ -102,16 +102,13 @@ export function ProductRowActions({
     Boolean(product.shopifyProductId) &&
     !product.inventorySyncedAt;
   const canPublish =
-    product.status === "ready" &&
-    !product.shopifyProductId &&
-    product.bidStatus !== "skipped" &&
-    product.bidStatus !== "lost";
+    product.status === "ready" && !product.shopifyProductId;
 
   const disabled = Boolean(busy) || pending;
 
   return (
     <div
-      className="flex flex-col items-end gap-2"
+      className="flex flex-col gap-2"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -121,9 +118,9 @@ export function ProductRowActions({
         <Countdown endsAt={product.auctionEndsAt} className="text-xs" />
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {selectable && (
-          <label className="flex cursor-pointer items-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1 text-[0.65rem] text-[var(--text-muted)]">
+          <label className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-[0.65rem] text-[var(--text-muted)]">
             <input
               type="checkbox"
               checked={Boolean(selected)}
@@ -138,7 +135,7 @@ export function ProductRowActions({
           href={product.sourceUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-lg border border-[var(--border)] px-2 py-1 text-[0.65rem] text-[var(--info)] hover:border-[var(--border-strong)]"
+          className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[0.65rem] font-medium text-[var(--text-muted)] hover:text-[var(--text)]"
         >
           Maxx
         </a>
@@ -147,27 +144,27 @@ export function ProductRowActions({
             href={adminUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-lg border border-[var(--border)] px-2 py-1 text-[0.65rem] text-[var(--success)] hover:border-[var(--border-strong)]"
+            className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[0.65rem] font-medium text-[var(--text-muted)] hover:text-[var(--text)]"
           >
             Shopify
           </a>
         )}
       </div>
 
-      <div className="flex flex-wrap justify-end gap-1">
+      <div className="flex flex-wrap gap-1.5">
         {(["won", "lost", "skipped"] as const).map((s) => (
           <button
             key={s}
             type="button"
             disabled={disabled}
             onClick={() => void setBid(s)}
-            className={`rounded-md px-2 py-1 text-[0.65rem] font-semibold capitalize transition ${
+            className={`rounded-full px-2.5 py-1 text-[0.65rem] font-semibold capitalize transition ${
               product.bidStatus === s
                 ? s === "won"
-                  ? "bg-[var(--success)] text-[#0a0c0b]"
+                  ? "bg-[var(--success)] text-white"
                   : s === "lost"
                     ? "bg-[var(--danger)] text-white"
-                    : "bg-[var(--text-faint)] text-[#0a0c0b]"
+                    : "bg-[var(--text-faint)] text-white"
                 : "border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
             }`}
           >
@@ -179,7 +176,7 @@ export function ProductRowActions({
             type="button"
             disabled={disabled}
             onClick={() => void publish()}
-            className="rounded-md bg-[var(--accent)] px-2 py-1 text-[0.65rem] font-bold text-[#0a0c0b]"
+            className="rounded-full bg-[var(--accent)] px-3 py-1 text-[0.65rem] font-bold text-white"
           >
             {busy === "publish" ? "…" : "Publier"}
           </button>
@@ -189,7 +186,7 @@ export function ProductRowActions({
             type="button"
             disabled={disabled}
             onClick={() => void syncStock()}
-            className="rounded-md bg-[var(--warning)] px-2 py-1 text-[0.65rem] font-bold text-[#0a0c0b]"
+            className="rounded-full bg-[var(--accent)] px-3 py-1 text-[0.65rem] font-bold text-white"
           >
             {busy === "stock" ? "…" : "Activer stock"}
           </button>
@@ -197,9 +194,7 @@ export function ProductRowActions({
       </div>
 
       {msg && (
-        <p className="max-w-[12rem] text-right text-[0.6rem] text-[var(--text-faint)]">
-          {msg}
-        </p>
+        <p className="text-[0.6rem] text-[var(--text-faint)]">{msg}</p>
       )}
     </div>
   );

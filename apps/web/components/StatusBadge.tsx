@@ -4,32 +4,32 @@ const STATUS_CONFIG: Record<
 > = {
   captured: {
     label: "Capturé",
-    className: "bg-white/5 text-[var(--text-muted)] border border-white/10",
+    className: "bg-white/90 text-[var(--text-muted)] border border-[var(--border)] backdrop-blur",
     dot: "bg-[var(--text-faint)]",
   },
   enriching: {
     label: "Enrichissement",
-    className: "bg-[rgba(94,184,255,0.12)] text-[var(--info)] border border-[rgba(94,184,255,0.25)]",
-    dot: "bg-[var(--info)] animate-pulse",
+    className: "bg-white/90 text-[var(--text)] border border-[var(--border)] backdrop-blur",
+    dot: "bg-[var(--text)] animate-pulse",
   },
   ready: {
     label: "Prêt",
-    className: "bg-[var(--accent-glow)] text-[var(--accent)] border border-[rgba(200,245,66,0.3)]",
-    dot: "bg-[var(--accent)]",
+    className: "bg-[var(--accent)] text-white border border-transparent",
+    dot: "bg-white",
   },
   publishing: {
     label: "Publication",
-    className: "bg-[rgba(245,197,66,0.12)] text-[var(--warning)] border border-[rgba(245,197,66,0.25)]",
-    dot: "bg-[var(--warning)] animate-pulse",
+    className: "bg-white/90 text-[var(--text)] border border-[var(--border)] backdrop-blur",
+    dot: "bg-[var(--text)] animate-pulse",
   },
   active: {
     label: "Actif",
-    className: "bg-[rgba(94,224,154,0.12)] text-[var(--success)] border border-[rgba(94,224,154,0.25)]",
+    className: "bg-white/90 text-[var(--success)] border border-[var(--border)] backdrop-blur",
     dot: "bg-[var(--success)]",
   },
   error: {
     label: "Erreur",
-    className: "bg-[rgba(255,107,107,0.12)] text-[var(--danger)] border border-[rgba(255,107,107,0.25)]",
+    className: "bg-white/90 text-[var(--danger)] border border-[rgba(229,72,77,0.3)] backdrop-blur",
     dot: "bg-[var(--danger)]",
   },
 };
@@ -38,7 +38,7 @@ export function StatusBadge({ status }: { status: string }) {
   const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.captured;
   return (
     <span className={`badge ${config.className}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${config.dot}`} />
+      <span className={`size-1.5 rounded-full ${config.dot}`} />
       {config.label}
     </span>
   );

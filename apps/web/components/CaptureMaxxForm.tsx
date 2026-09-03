@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function CaptureMaxxForm() {
+export function CaptureMaxxForm({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,7 +26,7 @@ export function CaptureMaxxForm() {
         return;
       }
       if (!res.ok) throw new Error(data.message ?? data.error ?? "Échec capture");
-      setMsg("Capturé — enrichissement IA en cours…");
+      setMsg("Capturé — enrichissement IA…");
       setUrl("");
       router.push(`/products/${data.productId}`);
       router.refresh();
@@ -40,10 +40,14 @@ export function CaptureMaxxForm() {
   return (
     <form
       onSubmit={(e) => void submit(e)}
-      className="panel panel-glow flex flex-col gap-2 p-4 sm:flex-row sm:items-end"
+      className={
+        compact
+          ? "flex flex-col gap-2"
+          : "bento flex flex-col gap-2 p-4 sm:flex-row sm:items-end"
+      }
     >
       <div className="min-w-0 flex-1">
-        <label className="field-label">Capturer un lot Maxx (URL)</label>
+        {!compact && <label className="field-label">Capturer un lot Maxx</label>}
         <input
           className="field-input w-full"
           type="url"
@@ -54,10 +58,16 @@ export function CaptureMaxxForm() {
           disabled={busy}
         />
       </div>
-      <button type="submit" className="btn btn-primary shrink-0" disabled={busy || !url.trim()}>
+      <button
+        type="submit"
+        className="btn btn-primary w-full shrink-0 sm:w-auto"
+        disabled={busy || !url.trim()}
+      >
         {busy ? "Capture…" : "Capturer + IA"}
       </button>
-      {msg && <p className="basis-full text-xs text-[var(--text-muted)]">{msg}</p>}
+      {msg && (
+        <p className="basis-full text-xs text-[var(--text-muted)]">{msg}</p>
+      )}
     </form>
   );
 }

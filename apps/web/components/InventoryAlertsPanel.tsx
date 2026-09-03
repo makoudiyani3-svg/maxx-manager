@@ -96,7 +96,7 @@ export function InventoryAlertsPanel({
   ).filter((s) => (focus ? s.key === focus : s.count > 0));
 
   return (
-    <section className="panel panel-glow space-y-4 p-4">
+    <section className="bento flex flex-col gap-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">

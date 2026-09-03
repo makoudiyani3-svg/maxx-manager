@@ -34,19 +34,6 @@ interface MarketAnalysis {
   competitionLevel?: string;
   recommendation?: string;
   summary?: string;
-  deal?: {
-    maxBidLot?: number;
-    maxBidUnit?: number;
-    transportPerArticle?: number;
-    unitLandedAtMaxBid?: number;
-    unitLandedAtCurrentBid?: number | null;
-    markupAtMaxBidPercent?: number;
-    isViable?: boolean;
-    skipReason?: string | null;
-    articlesInWeek?: number;
-    premiumRate?: number;
-    weeklyTransport?: number;
-  };
 }
 
 interface Product {
@@ -72,10 +59,6 @@ interface Product {
   auctionEndsAt?: string | null;
   lotQuantity: number;
   bidStatus: string;
-  maxBidLot: string | null;
-  maxBidUnit: string | null;
-  transportShare: string | null;
-  dealMath: MarketAnalysis["deal"] | null;
   stockQty?: number;
   lowStockThreshold?: number;
   assignedTo?: string | null;
@@ -118,7 +101,6 @@ export function ProductDetailClient({ product }: { product: Product }) {
   const [message, setMessage] = useState<string | null>(null);
 
   const market = product.marketAnalysis;
-  const deal = market?.deal ?? product.dealMath;
   const heroImage = useMemo(() => {
     const selected = product.images.find((i) => selectedImages.has(i.id));
     return selected ?? product.images[0];
@@ -247,7 +229,6 @@ export function ProductDetailClient({ product }: { product: Product }) {
     setPublishing(true);
     setMessage(null);
     try {
-      // Persist title/price/images first (publish API reads from DB)
       try {
         await saveProduct();
       } catch (saveErr) {
@@ -259,11 +240,12 @@ export function ProductDetailClient({ product }: { product: Product }) {
             ? saveErr
             : new Error("Échec sauvegarde avant publish");
         }
-        // Keep going — DB may already have a valid price
         console.warn("Save before publish failed:", saveErr);
       }
 
-      const res = await fetch(`/api/publish/${product.id}`, { method: "POST" });
+      const res = await fetch(`/api/publish/${product.id}`, {
+        method: "POST",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Échec de la publication");
       setMessage(`Publié sur Shopify — ${data.shopifyProductId}`);
@@ -417,7 +399,9 @@ export function ProductDetailClient({ product }: { product: Product }) {
         </div>
       </div>
 
-      {(message || product.errorMessage || product.shopifyProductId) && (
+      {(message ||
+        (product.errorMessage && product.status === "error") ||
+        product.shopifyProductId) && (
         <div className="space-y-2">
           {message && (
             <div
@@ -430,7 +414,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
               {message}
             </div>
           )}
-          {product.errorMessage && (
+          {product.errorMessage && product.status === "error" && (
             <div className="rounded-xl border border-[rgba(255,107,107,0.3)] bg-[rgba(255,107,107,0.1)] px-4 py-3 text-sm text-[var(--danger)]">
               {product.errorMessage}
             </div>
@@ -466,29 +450,16 @@ export function ProductDetailClient({ product }: { product: Product }) {
       <div className="panel panel-glow sticky top-16 z-10 flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between lg:top-4">
         <div className="min-w-0">
           <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-            Décision enchère
+            Statut enchère
           </p>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <p className="font-display text-2xl font-bold text-[var(--warning)]">
-              {product.maxBidLot != null
-                ? `${Number(product.maxBidLot).toFixed(2)} $`
-                : "—"}
-              <span className="ml-2 text-xs font-medium text-[var(--text-faint)]">
-                max bid lot
-              </span>
+            <p className="font-display text-2xl font-bold capitalize text-[var(--warning)]">
+              {product.bidStatus}
             </p>
             {product.auctionEndsAt && (
               <p className="text-sm">
                 Fin <Countdown endsAt={product.auctionEndsAt} className="font-semibold" />
               </p>
-            )}
-            {deal?.isViable === false && (
-              <p className="text-sm text-[var(--danger)]">
-                {deal.skipReason ?? "Non viable"}
-              </p>
-            )}
-            {deal?.isViable === true && (
-              <p className="text-sm text-[var(--success)]">Deal viable</p>
             )}
           </div>
         </div>
@@ -501,12 +472,12 @@ export function ProductDetailClient({ product }: { product: Product }) {
               className={`rounded-full px-3 py-1.5 text-xs font-semibold capitalize ${
                 product.bidStatus === s
                   ? s === "won"
-                    ? "bg-[var(--success)] text-[#0a0c0b]"
+                    ? "bg-[var(--success)] text-white"
                     : s === "lost"
                       ? "bg-[var(--danger)] text-white"
                       : s === "watching" || s === "capped"
-                        ? "bg-[var(--warning)] text-[#0a0c0b]"
-                        : "bg-[var(--text-faint)] text-[#0a0c0b]"
+                        ? "bg-[var(--warning)] text-white"
+                        : "bg-[var(--text-faint)] text-white"
                   : "border border-[var(--border)] text-[var(--text-muted)]"
               }`}
             >
@@ -515,7 +486,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
           ))}
           {product.status === "ready" && !product.shopifyProductId && (
             <button
-              onClick={handlePublish}
+              onClick={() => void handlePublish()}
               disabled={publishing}
               className="btn btn-primary text-xs"
             >
@@ -526,7 +497,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
             <button
               type="button"
               onClick={() => void syncInventory()}
-              className="rounded-full bg-[var(--warning)] px-3 py-1.5 text-xs font-bold text-[#0a0c0b]"
+              className="rounded-full bg-[var(--warning)] px-3 py-1.5 text-xs font-bold text-white"
             >
               Activer stock
             </button>
@@ -560,27 +531,13 @@ export function ProductDetailClient({ product }: { product: Product }) {
             </div>
             {product.costPrice && (
               <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-faint)]">Coût landed*</span>
+                <span className="text-[var(--text-faint)]">Coût source*</span>
                 <span>{Number(product.costPrice).toFixed(2)} $</span>
-              </div>
-            )}
-            {product.maxBidLot != null && (
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-faint)]">Max enchère lot</span>
-                <span className="font-semibold text-[var(--warning)]">
-                  {Number(product.maxBidLot).toFixed(2)} $
-                </span>
-              </div>
-            )}
-            {product.transportShare != null && (
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-faint)]">Transport / art.</span>
-                <span>{Number(product.transportShare).toFixed(2)} $</span>
               </div>
             )}
             {market?.marginPercent != null && (
               <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-faint)]">Markup vs coût</span>
+                <span className="text-[var(--text-faint)]">Marge vs coût</span>
                 <span className="text-[var(--success)]">{market.marginPercent}%</span>
               </div>
             )}
@@ -595,7 +552,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
               </div>
             )}
             <p className="text-[0.6rem] leading-relaxed text-[var(--text-faint)]">
-              *Coût = enchère×1.30 ÷ qty + transport (400$/sem ÷ articles event)
+              *Coût source estimé (lot Maxx ÷ qty), sans transport
             </p>
             {product.tags?.length > 0 && (
               <div className="flex flex-wrap gap-1.5 pt-1">
@@ -721,55 +678,6 @@ export function ProductDetailClient({ product }: { product: Product }) {
 
           {tab === "market" && (
             <section className="panel panel-glow p-5">
-              {deal && (
-                <div className="mb-5 rounded-xl border border-[rgba(245,197,66,0.35)] bg-[rgba(245,197,66,0.08)] p-4">
-                  <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--warning)]">
-                    Plafond d&apos;enchère (event Maxx)
-                  </p>
-                  <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    {[
-                      {
-                        label: "Max bid lot",
-                        value: `${Number(deal.maxBidLot ?? product.maxBidLot ?? 0).toFixed(2)} $`,
-                      },
-                      {
-                        label: "Max bid / u",
-                        value: `${Number(deal.maxBidUnit ?? product.maxBidUnit ?? 0).toFixed(2)} $`,
-                      },
-                      {
-                        label: "Transport / art.",
-                        value: `${Number(deal.transportPerArticle ?? product.transportShare ?? 0).toFixed(2)} $`,
-                      },
-                      {
-                        label: "Landed @ max",
-                        value: `${Number(deal.unitLandedAtMaxBid ?? product.costPrice ?? 0).toFixed(2)} $`,
-                      },
-                    ].map((item) => (
-                      <div key={item.label}>
-                        <p className="text-[0.65rem] text-[var(--text-faint)]">{item.label}</p>
-                        <p className="font-display text-lg font-semibold">{item.value}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-3 text-xs text-[var(--text-muted)]">
-                    Premium +{Math.round((deal.premiumRate ?? 0.3) * 100)}% · Transport{" "}
-                    {deal.weeklyTransport ?? 400}$ ÷ {deal.articlesInWeek ?? "?"} articles · Marge
-                    mini 100% (vente ≥ 2× coût)
-                  </p>
-                  {deal.skipReason && (
-                    <p className="mt-2 text-sm text-[var(--danger)]">{deal.skipReason}</p>
-                  )}
-                  {product.rawPrice != null && (
-                    <p className="mt-2 text-xs text-[var(--text-faint)]">
-                      Enchère / prix Maxx actuel (lot): {Number(product.rawPrice).toFixed(2)} $
-                      {deal.unitLandedAtCurrentBid != null
-                        ? ` → landed unitaire ${deal.unitLandedAtCurrentBid.toFixed(2)} $`
-                        : ""}
-                    </p>
-                  )}
-                </div>
-              )}
-
               <div className="mb-4 flex flex-wrap gap-2">
                 {(["watching", "capped", "published", "won", "lost", "skipped"] as const).map(
                   (s) => (
@@ -779,7 +687,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
                       onClick={() => void setBidStatus(s)}
                       className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
                         product.bidStatus === s
-                          ? "bg-[var(--accent)] text-[#0a0c0b]"
+                          ? "bg-[var(--accent)] text-white"
                           : "border border-[var(--border)] text-[var(--text-muted)]"
                       }`}
                     >
@@ -800,7 +708,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
                           : "—",
                       },
                       {
-                        label: "Markup",
+                        label: "Marge",
                         value:
                           market.marginPercent != null
                             ? `${market.marginPercent}%`
@@ -939,7 +847,7 @@ export function ProductDetailClient({ product }: { product: Product }) {
                             : img.source}
                         </div>
                         {selected && (
-                          <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-bold text-[#0a0c0b]">
+                          <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-bold text-white">
                             ✓
                           </div>
                         )}

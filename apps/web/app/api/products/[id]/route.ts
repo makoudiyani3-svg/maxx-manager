@@ -2,13 +2,11 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { z } from "zod";
 import { sanitizeHtml } from "@/lib/html";
-import { computeDealMath } from "@/lib/enrichment/pricing";
 import { adjustInventory } from "@/lib/inventory/adjust";
 import {
   updateShopifyProductContent,
   updateShopifyVariantPrice,
 } from "@/lib/shopify/updateProduct";
-import type { Prisma } from "@prisma/client";
 import { requireDashboardUser } from "@/lib/auth/session";
 
 const updateSchema = z.object({
@@ -70,63 +68,14 @@ export async function PATCH(
       return Response.json({ error: "Product not found" }, { status: 404 });
     }
 
-    let dealUpdate: Prisma.ProductUpdateInput = {};
-
-    if (data.suggestedPrice !== undefined) {
-      const articlesInWeek = existing.eventWeekKey
-        ? await prisma.product.count({
-            where: {
-              eventWeekKey: existing.eventWeekKey,
-              bidStatus: { notIn: ["lost", "skipped"] },
-            },
-          })
-        : 1;
-
-      const siblings = existing.eventWeekKey
-        ? await prisma.product.findMany({
-            where: {
-              eventWeekKey: existing.eventWeekKey,
-              bidStatus: { notIn: ["lost", "skipped"] },
-            },
-            select: { lotQuantity: true },
-          })
-        : [];
-      const unitArticles = Math.max(
-        1,
-        siblings.reduce((s, p) => s + Math.max(1, p.lotQuantity || 1), 0) ||
-          articlesInWeek
-      );
-
-      const deal = computeDealMath({
-        sellPrice: data.suggestedPrice,
-        lotQuantity: existing.lotQuantity || 1,
-        articlesInWeek: unitArticles,
-        currentBidLot: existing.rawPrice ? Number(existing.rawPrice) : null,
-      });
-
-      dealUpdate = {
-        maxBidLot: deal.maxBidLot,
-        maxBidUnit: deal.maxBidUnit,
-        transportShare: deal.transportPerArticle,
-        costPrice: deal.unitLandedAtMaxBid,
-        dealMath: deal as unknown as Prisma.InputJsonValue,
-        ...(data.bidStatus
-          ? {}
-          : { bidStatus: deal.isViable ? "capped" : "skipped" }),
-      };
-    }
-
     let actualCostUnit: number | null | undefined;
     if (data.actualCostLot !== undefined) {
       if (data.actualCostLot == null) {
         actualCostUnit = null;
       } else {
         const qty = Math.max(1, existing.lotQuantity || 1);
-        const premium = data.actualCostLot * 1.3;
-        const transport = existing.transportShare
-          ? Number(existing.transportShare)
-          : 0;
-        actualCostUnit = premium / qty + transport;
+        // Coût unitaire simple = enchère × 1.30 ÷ qty (sans transport)
+        actualCostUnit = (data.actualCostLot * 1.3) / qty;
       }
     }
 
@@ -158,7 +107,6 @@ export async function PATCH(
         ...(data.lowStockThreshold !== undefined && {
           lowStockThreshold: data.lowStockThreshold,
         }),
-        ...dealUpdate,
       },
       include: {
         images: { orderBy: { position: "asc" } },

@@ -1,9 +1,5 @@
 import { chatCompletion } from "@/lib/openrouter";
 import { searchShopping } from "@/lib/serper";
-import {
-  computeDealMath,
-  type DealMathResult,
-} from "@/lib/enrichment/pricing";
 
 export interface MarketAnalysis {
   competitorPrices: number[];
@@ -15,7 +11,6 @@ export interface MarketAnalysis {
   summary: string;
   unitCost?: number;
   lotQuantity?: number;
-  deal?: DealMathResult;
 }
 
 function median(nums: number[]): number | null {
@@ -51,12 +46,12 @@ function dropOutliers(prices: number[]): number[] {
   return filtered.length >= 3 ? filtered : sorted;
 }
 
+/** Market comps + suggested sell price only — no transport / rentabilité gates. */
 export async function runMarketAnalysis(input: {
   title: string;
   unitCost?: number;
   lotQuantity?: number;
   lotPrice?: number;
-  articlesInWeek?: number;
   brand?: string;
   model?: string;
   color?: string;
@@ -83,7 +78,6 @@ export async function runMarketAnalysis(input: {
   const filteredResults = shoppingResults.filter((r) => {
     if (!r.price || r.price <= 0) return false;
     const score = titleOverlapScore(r.title || "", titleTokens);
-    // Require decent overlap when we know brand/model
     if (input.brand || input.model) return score >= 0.35;
     return score >= 0.2;
   });
@@ -99,13 +93,13 @@ export async function runMarketAnalysis(input: {
     [
       {
         role: "system",
-        content: `Tu es analyste pricing senior Québec/Canada pour UNIT411 (liquidation → Shopify).
+        content: `Tu es analyste pricing senior Québec/Canada pour UNIT411.
 
 Analyse UN SEUL article (pas le lot).
-suggestedPrice = prix Shopify concurrentiel pour 1 unité, ancré sur le marché (souvent ~5–12% sous la médiane si concurrence haute).
-Marge business cible: vente ≥ 2× coût landed — tu proposes le prix marché; le plafond enchère est calculé ailleurs.
-Si moins de 3 prix concurrents fiables: recommendation="review" et sois conservateur.
+suggestedPrice = prix Shopify concurrentiel pour 1 unité, ancré sur le marché.
+Si moins de 3 prix concurrents fiables: recommendation="review".
 Ne invente PAS de prix concurrents absents des données.
+Pas de calcul transport ni plafond d'enchère.
 summary: 1–2 phrases FR-CA actionnables.
 
 Réponds UNIQUEMENT en JSON: competitorPrices (number[]), suggestedPrice (number), marginPercent (number), demandScore (1-10), competitionLevel ("low"|"medium"|"high"), recommendation ("publish"|"review"|"skip"), summary (string).`,
@@ -117,7 +111,7 @@ Réponds UNIQUEMENT en JSON: competitorPrices (number[]), suggestedPrice (number
           brand: input.brand,
           model: input.model,
           color: input.color,
-          cout_unitaire_estime_avant_transport: input.unitCost,
+          cout_source_estime: input.unitCost,
           quantite_lot_source: input.lotQuantity ?? 1,
           prix_lot_source: input.lotPrice,
           prix_concurrents_filtres: competitorPrices,
@@ -132,13 +126,15 @@ Réponds UNIQUEMENT en JSON: competitorPrices (number[]), suggestedPrice (number
 
   const parsed = JSON.parse(content) as MarketAnalysis;
   parsed.competitorPrices = competitorPrices;
+  parsed.lotQuantity = input.lotQuantity ?? 1;
+  parsed.unitCost = input.unitCost;
 
   const marketMedian = median(competitorPrices);
   if (!parsed.suggestedPrice || parsed.suggestedPrice <= 0) {
     if (marketMedian) {
       parsed.suggestedPrice = Math.round(marketMedian * 0.92 * 100) / 100;
     } else if (input.unitCost) {
-      parsed.suggestedPrice = Math.round(input.unitCost * 2.2 * 100) / 100;
+      parsed.suggestedPrice = Math.round(input.unitCost * 2 * 100) / 100;
     } else {
       parsed.suggestedPrice = 0;
     }
@@ -147,7 +143,6 @@ Réponds UNIQUEMENT en JSON: competitorPrices (number[]), suggestedPrice (number
   if (thinComps) {
     parsed.recommendation = "review";
     if (marketMedian) {
-      // More conservative when comps are thin
       parsed.suggestedPrice = Math.round(marketMedian * 0.88 * 100) / 100;
     }
     parsed.summary = [
@@ -156,42 +151,18 @@ Réponds UNIQUEMENT en JSON: competitorPrices (number[]), suggestedPrice (number
     ]
       .filter(Boolean)
       .join(" — ");
+  } else if (parsed.recommendation !== "skip" && parsed.recommendation !== "review") {
+    parsed.recommendation = "publish";
   }
 
-  const lotQuantity = input.lotQuantity ?? 1;
-  const articlesInWeek = Math.max(1, input.articlesInWeek ?? 1);
-
-  const deal = computeDealMath({
-    sellPrice: parsed.suggestedPrice,
-    lotQuantity,
-    articlesInWeek,
-    currentBidLot: input.lotPrice,
-  });
-
-  parsed.deal = deal;
-  parsed.unitCost = deal.unitLandedAtMaxBid;
-  parsed.lotQuantity = lotQuantity;
-  parsed.marginPercent = deal.markupAtMaxBidPercent;
-
-  if (!deal.isViable) {
-    parsed.recommendation = "skip";
-    parsed.summary = [
-      parsed.summary,
-      deal.skipReason,
-      `Plafond enchère lot: ${deal.maxBidLot.toFixed(2)} $`,
-    ]
-      .filter(Boolean)
-      .join(" — ");
-  } else if (parsed.recommendation === "skip" || parsed.recommendation === "review") {
-    // keep AI / thin-comps decision
-  } else {
-    parsed.recommendation = "publish";
-    parsed.summary = [
-      parsed.summary,
-      `Max enchère lot ${deal.maxBidLot.toFixed(2)} $ (unité ${deal.maxBidUnit.toFixed(2)} $)`,
-      `Transport ${deal.transportPerArticle.toFixed(2)} $/article (${deal.articlesInWeek} art. × event)`,
-      `Premium enchère +${Math.round(deal.premiumRate * 100)}%`,
-    ].join(" · ");
+  if (
+    input.unitCost &&
+    input.unitCost > 0 &&
+    parsed.suggestedPrice > 0
+  ) {
+    parsed.marginPercent = Math.round(
+      ((parsed.suggestedPrice - input.unitCost) / parsed.suggestedPrice) * 100
+    );
   }
 
   return parsed;

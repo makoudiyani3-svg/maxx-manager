@@ -13,11 +13,8 @@ import {
 } from "@/lib/enrichment/imageVerify";
 import { parseLotToProduct } from "@/lib/enrichment/productIdentity";
 import {
-  computeDealMath,
   parseMaxxEventFromUrl,
   isWeakEventWeekKey,
-  WEEKLY_TRANSPORT_CAD,
-  AUCTION_PREMIUM_RATE,
 } from "@/lib/enrichment/pricing";
 import type { CopywritingResult } from "@/lib/enrichment/copywriting";
 import type { MarketAnalysis } from "@/lib/enrichment/market";
@@ -49,57 +46,23 @@ function fallbackCopy(manufacturerTitle: string, rawDescription?: string | null)
 
 function fallbackMarket(
   unitCost: number | null | undefined,
-  lotQuantity: number,
-  articlesInWeek: number,
-  lotPrice?: number
+  lotQuantity: number
 ): MarketAnalysis {
   const cost = unitCost ?? 0;
-  const suggestedPrice = cost
-    ? Math.round(cost * 2.2 * 100) / 100
-    : 0;
-  const deal = computeDealMath({
-    sellPrice: suggestedPrice,
-    lotQuantity,
-    articlesInWeek,
-    currentBidLot: lotPrice,
-  });
-
+  const suggestedPrice = cost ? Math.round(cost * 2 * 100) / 100 : 0;
   return {
     competitorPrices: [],
     suggestedPrice,
-    marginPercent: deal.markupAtMaxBidPercent,
+    marginPercent: suggestedPrice > 0 && cost > 0
+      ? Math.round(((suggestedPrice - cost) / suggestedPrice) * 100)
+      : 0,
     demandScore: 5,
     competitionLevel: "medium",
-    recommendation: deal.isViable ? "review" : "skip",
-    summary:
-      "Analyse IA non disponible. Prix ≈ 2.2× coût estimé; plafond enchère calculé (premium 30% + transport 400$/sem).",
-    unitCost: deal.unitLandedAtMaxBid,
+    recommendation: "review",
+    summary: "Analyse IA non disponible. Prix ≈ 2× coût source estimé.",
+    unitCost: cost || undefined,
     lotQuantity,
-    deal,
   };
-}
-
-async function countArticlesInEventWeek(
-  eventWeekKey: string,
-  selfLotQuantity: number
-): Promise<number> {
-  const siblings = await prisma.product.findMany({
-    where: {
-      eventWeekKey,
-      bidStatus: { notIn: ["lost", "skipped"] },
-    },
-    select: { id: true, lotQuantity: true },
-  });
-
-  if (siblings.length === 0) {
-    return Math.max(1, selfLotQuantity);
-  }
-
-  const totalUnits = siblings.reduce(
-    (sum, p) => sum + Math.max(1, p.lotQuantity || 1),
-    0
-  );
-  return Math.max(1, totalUnits);
 }
 
 export async function enrichProduct(productId: string): Promise<void> {
@@ -210,11 +173,6 @@ export async function enrichProduct(productId: string): Promise<void> {
       },
     });
 
-    const articlesInWeek = await countArticlesInEventWeek(
-      eventWeekKey,
-      lotQuantity
-    );
-
     if (lotQuantity > 1) {
       warnings.push(
         `Lot ×${lotQuantity} → fiche unitaire « ${identity.manufacturerTitle} »`
@@ -223,9 +181,9 @@ export async function enrichProduct(productId: string): Promise<void> {
     if (identity.color) {
       warnings.push(`Couleur/finition ciblée: ${identity.color}`);
     }
-    warnings.push(
-      `Event ${eventWeekKey} · transport ${WEEKLY_TRANSPORT_CAD}$ ÷ ${articlesInWeek} art. · premium enchère +${Math.round(AUCTION_PREMIUM_RATE * 100)}% · marge mini 100%`
-    );
+    if (eventWeekKey) {
+      warnings.push(`Event ${eventWeekKey}`);
+    }
 
     // 2) Exact manufacturer photos (+ Maxx lot photos appended later)
     let rankedImages: ProductImageCandidate[] = [];
@@ -434,7 +392,7 @@ export async function enrichProduct(productId: string): Promise<void> {
       copy.tags = [`brand:${identity.brand}`, ...copy.tags];
     }
 
-    // 4) Market — per unit
+    // 4) Market — per unit (prix marché uniquement, pas de transport / rentabilité)
     let market: MarketAnalysis;
     try {
       if (!isAnyAiConfigured()) {
@@ -445,7 +403,6 @@ export async function enrichProduct(productId: string): Promise<void> {
         unitCost,
         lotQuantity,
         lotPrice,
-        articlesInWeek,
         brand: identity.brand,
         model: identity.model,
         color: identity.color ?? undefined,
@@ -453,29 +410,11 @@ export async function enrichProduct(productId: string): Promise<void> {
     } catch (err) {
       console.warn("Market analysis fallback:", err);
       warnings.push("Étude de marché IA indisponible");
-      market = fallbackMarket(unitCost, lotQuantity, articlesInWeek, lotPrice);
+      market = fallbackMarket(unitCost, lotQuantity);
     }
 
     market.lotQuantity = lotQuantity;
-    const deal =
-      market.deal ??
-      computeDealMath({
-        sellPrice: market.suggestedPrice,
-        lotQuantity,
-        articlesInWeek,
-        currentBidLot: lotPrice,
-      });
-    market.deal = deal;
-    market.unitCost = deal.unitLandedAtMaxBid;
-
-    if (isWeakEventWeekKey(eventWeekKey)) {
-      deal.isViable = false;
-      deal.skipReason =
-        "Event Maxx manquant — transport 400$/sem non partagé correctement. Relance avec URL event.";
-      warnings.push(deal.skipReason);
-    } else if (!deal.isViable) {
-      warnings.push(deal.skipReason ?? "Deal non viable (marge 100%)");
-    }
+    market.unitCost = unitCost ?? undefined;
 
     await prisma.product.update({
       where: { id: productId },
@@ -488,20 +427,25 @@ export async function enrichProduct(productId: string): Promise<void> {
         seoDescription: copy.seoDescription,
         tags: copy.tags,
         suggestedPrice: market.suggestedPrice || null,
-        costPrice: deal.unitLandedAtMaxBid || unitCost || null,
+        costPrice: unitCost || null,
         marketAnalysis: market as unknown as Prisma.InputJsonValue,
         lotQuantity,
         eventWeekKey,
         eventId,
         ...(eventName ? { eventName } : {}),
-        maxBidLot: deal.maxBidLot,
-        maxBidUnit: deal.maxBidUnit,
-        transportShare: deal.transportPerArticle,
-        dealMath: deal as unknown as Prisma.InputJsonValue,
-        bidStatus: deal.isViable ? "capped" : "skipped",
-        errorMessage: warnings.length > 0 ? warnings.join(" · ") : null,
+        maxBidLot: null,
+        maxBidUnit: null,
+        transportShare: null,
+        dealMath: Prisma.JsonNull,
+        bidStatus: "capped",
+        // Notes d'enrichissement → logs seulement (pas de bandeau rouge transport/marge)
+        errorMessage: null,
       },
     });
+
+    if (warnings.length > 0) {
+      console.info(`[enrich ${productId}]`, warnings.join(" · "));
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown enrichment error";
     await prisma.product.update({

@@ -1,14 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireDashboardUser } from "@/lib/auth/session";
 import { publishProductToShopify } from "@/lib/shopify/publish";
 import { adjustInventory } from "@/lib/inventory/adjust";
+import { requireDashboardUser } from "@/lib/auth/session";
 
 export const maxDuration = 60;
-
-type DealMathShape = {
-  isViable?: boolean;
-};
 
 export async function POST(
   _request: NextRequest,
@@ -28,28 +24,11 @@ export async function POST(
     return Response.json({ error: "Product not found" }, { status: 404 });
   }
 
-  if (product.status !== "ready") {
+  if (product.status !== "ready" && product.status !== "error") {
     return Response.json(
       {
         error: `Product is not ready for publishing (status: ${product.status})`,
       },
-      { status: 400 }
-    );
-  }
-
-  if (product.bidStatus === "skipped" || product.bidStatus === "lost") {
-    return Response.json(
-      {
-        error: `Deal non viable (bidStatus: ${product.bidStatus}). Recalcule le prix ou force via deal math.`,
-      },
-      { status: 400 }
-    );
-  }
-
-  const deal = product.dealMath as DealMathShape | null;
-  if (deal && deal.isViable === false) {
-    return Response.json(
-      { error: "Deal non viable (marge / plafond enchère). Ajuste le prix avant publish." },
       { status: 400 }
     );
   }
@@ -130,7 +109,8 @@ export async function POST(
       status: "active",
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Publish failed";
+    const message =
+      error instanceof Error ? error.message : "Unknown publish error";
     await prisma.product.update({
       where: { id },
       data: { status: "error", errorMessage: message },

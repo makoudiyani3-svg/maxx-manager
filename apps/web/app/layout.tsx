@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
+import { Sora, DM_Sans, JetBrains_Mono, Geist } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import { createClient } from "@/lib/supabase/server";
 import { isEmailAllowed } from "@/lib/auth/allowlist";
 import "./globals.css";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const sora = Sora({
   variable: "--font-sora",
@@ -50,7 +53,7 @@ export default async function RootLayout({
   return (
     <html
       lang="fr"
-      className={`${sora.variable} ${dmSans.variable} ${jetbrains.variable} h-full antialiased`}
+      className={cn("h-full", "antialiased", sora.variable, dmSans.variable, jetbrains.variable, "font-sans", geist.variable)}
     >
       <body className="min-h-full">
         <Suspense fallback={<div className="min-h-screen bg-[var(--bg)]" />}>

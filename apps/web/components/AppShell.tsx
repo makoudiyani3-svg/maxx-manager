@@ -5,22 +5,17 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const NAV = [
-  { href: "/", label: "War Room", icon: "◈", match: "home" },
-  { href: "/?bid=watching", label: "Watching", icon: "○", match: "bid=watching" },
-  { href: "/?bid=capped", label: "Capped", icon: "◎", match: "bid=capped" },
-  { href: "/?status=ready", label: "Prêts à publier", icon: "◆", match: "status=ready" },
-  { href: "/?bid=published", label: "Publiés", icon: "●", match: "bid=published" },
-  { href: "/?bid=won", label: "Won", icon: "✓", match: "bid=won" },
-  { href: "/?bid=lost", label: "Lost", icon: "×", match: "bid=lost" },
-  { href: "/?alert=low", label: "Alertes stock", icon: "⚠", match: "alert=low" },
-  { href: "/?status=error", label: "Erreurs", icon: "!", match: "status=error" },
+  { href: "/", label: "War Room", match: "home" },
+  { href: "/?status=ready", label: "Prêts", match: "status=ready" },
+  { href: "/?bid=published", label: "Publiés", match: "bid=published" },
+  { href: "/?bid=won", label: "Won", match: "bid=won" },
+  { href: "/?alert=low", label: "Alertes", match: "alert=low" },
 ];
 
 function ShopifyHealthDot() {
   const [info, setInfo] = useState<{
     ok: boolean | null;
     name?: string;
-    domain?: string;
   }>({ ok: null });
 
   useEffect(() => {
@@ -32,7 +27,6 @@ function ShopifyHealthDot() {
           setInfo({
             ok: Boolean(data.connected),
             name: data.shopName,
-            domain: data.myshopifyDomain,
           });
         }
       })
@@ -45,25 +39,19 @@ function ShopifyHealthDot() {
   }, []);
 
   return (
-    <div className="space-y-1 text-[0.7rem] text-[var(--text-faint)]">
-      <div className="flex items-center gap-2">
-        <span
-          className={`h-2 w-2 rounded-full ${
-            info.ok === null
-              ? "bg-[var(--text-faint)]"
-              : info.ok
-                ? "bg-[var(--success)] shadow-[0_0_8px_var(--success)]"
-                : "bg-[var(--danger)]"
-          }`}
-        />
-        Shopify {info.ok === null ? "…" : info.ok ? "OK" : "off"}
-      </div>
-      {info.ok && info.name && (
-        <p className="truncate pl-4 text-[0.65rem] text-[var(--text-muted)]">
-          {info.name}
-          {info.domain ? ` · ${info.domain}` : ""}
-        </p>
-      )}
+    <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+      <span
+        className={`size-2 rounded-full ${
+          info.ok === null
+            ? "bg-[var(--text-faint)]"
+            : info.ok
+              ? "bg-[var(--success)]"
+              : "bg-[var(--danger)]"
+        }`}
+      />
+      <span className="hidden sm:inline">
+        Shopify {info.ok === null ? "…" : info.ok ? info.name ?? "OK" : "off"}
+      </span>
     </div>
   );
 }
@@ -85,24 +73,89 @@ export function AppShell({
     return <>{children}</>;
   }
 
+  const initials = userEmail
+    ? userEmail
+        .split("@")[0]
+        .split(/[._-]/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((p) => p[0]?.toUpperCase() ?? "")
+        .join("") || "?"
+    : "U";
+
   return (
-    <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-elevated)]/80 backdrop-blur-xl lg:flex">
-        <div className="border-b border-[var(--border)] px-5 py-5">
-          <Link href="/" className="group block">
-            <div className="font-display text-lg font-bold tracking-tight">
-              Maxx<span className="text-[var(--accent)]">.</span>Manager
-            </div>
-            <p className="mt-0.5 text-xs text-[var(--text-faint)]">
-              War Room · UNIT411
-            </p>
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--bg)]/90 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+          <Link href="/" className="flex shrink-0 items-center gap-2.5">
+            <span className="flex size-9 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-bold text-white">
+              M
+            </span>
+            <span className="font-display text-base font-bold tracking-tight">
+              Maxx<span className="text-[var(--text-faint)]">.</span>Manager
+            </span>
           </Link>
+
+          <nav className="hidden items-center rounded-full bg-white/80 p-1 shadow-[var(--shadow-card)] md:flex">
+            {NAV.map((item) => {
+              let active = false;
+              if (item.match === "home") {
+                active = pathname === "/" && !isProduct && !query;
+              } else if (item.match.startsWith("bid=")) {
+                active =
+                  pathname === "/" &&
+                  searchParams.get("bid") === item.match.slice(4);
+              } else if (item.match.startsWith("status=")) {
+                active =
+                  pathname === "/" &&
+                  searchParams.get("status") === item.match.slice(7);
+              } else if (item.match.startsWith("alert=")) {
+                active =
+                  pathname === "/" &&
+                  searchParams.get("alert") === item.match.slice(6);
+              }
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    active
+                      ? "bg-white text-[var(--text)] shadow-sm"
+                      : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className="flex items-center gap-3">
+            <ShopifyHealthDot />
+            {userEmail && (
+              <div className="flex items-center gap-2 rounded-full bg-white py-1 pl-1 pr-3 shadow-[var(--shadow-card)]">
+                <span className="flex size-8 items-center justify-center rounded-full bg-[var(--bg)] text-xs font-bold">
+                  {initials}
+                </span>
+                <div className="hidden min-w-0 sm:block">
+                  <p className="truncate text-xs font-semibold leading-tight">
+                    {userEmail.split("@")[0]}
+                  </p>
+                  <form action="/auth/signout" method="post">
+                    <button
+                      type="submit"
+                      className="text-[0.65rem] text-[var(--text-faint)] hover:text-[var(--danger)]"
+                    >
+                      Déconnexion
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 p-3">
-          <p className="px-3 pb-2 pt-1 text-[0.65rem] font-bold uppercase tracking-widest text-[var(--text-faint)]">
-            Navigation
-          </p>
+        <nav className="flex gap-1 overflow-x-auto px-4 pb-3 md:hidden">
           {NAV.map((item) => {
             let active = false;
             if (item.match === "home") {
@@ -124,65 +177,22 @@ export function AppShell({
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold ${
                   active
-                    ? "bg-[var(--accent-glow)] text-[var(--accent)]"
-                    : "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+                    ? "bg-[var(--accent)] text-white"
+                    : "bg-white text-[var(--text-muted)]"
                 }`}
               >
-                <span className="w-4 text-center opacity-70">{item.icon}</span>
                 {item.label}
               </Link>
             );
           })}
         </nav>
+      </header>
 
-        <div className="space-y-3 border-t border-[var(--border)] p-4">
-          <ShopifyHealthDot />
-          {userEmail && (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
-              <p className="truncate text-[0.7rem] text-[var(--text-muted)]">{userEmail}</p>
-              <form action="/auth/signout" method="post" className="mt-2">
-                <button
-                  type="submit"
-                  className="text-[0.7rem] font-medium text-[var(--danger)] hover:underline"
-                >
-                  Déconnexion
-                </button>
-              </form>
-            </div>
-          )}
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
-            <p className="text-xs font-semibold text-[var(--text)]">Inventaire</p>
-            <p className="mt-1 text-[0.7rem] leading-relaxed text-[var(--text-faint)]">
-              Pool unique · importer catalogue Shopify · sync ventes.
-            </p>
-          </div>
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--bg)]/80 backdrop-blur-xl lg:hidden">
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <Link href="/" className="font-display text-base font-bold">
-              Maxx<span className="text-[var(--accent)]">.</span>Manager
-            </Link>
-            <div className="flex items-center gap-3">
-              <ShopifyHealthDot />
-              {userEmail && (
-                <form action="/auth/signout" method="post">
-                  <button type="submit" className="text-xs text-[var(--danger)]">
-                    Out
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
-        </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          {children}
-        </main>
-      </div>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        {children}
+      </main>
     </div>
   );
 }

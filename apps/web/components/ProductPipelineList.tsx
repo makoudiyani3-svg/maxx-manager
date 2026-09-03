@@ -11,7 +11,6 @@ interface ListProduct extends RowProduct {
   rawTitle: string | null;
   suggestedPrice: string | number | null;
   costPrice: string | number | null;
-  maxBidLot: string | number | null;
   eventWeekKey: string | null;
   sourceSite: string;
   createdAt: string;
@@ -26,15 +25,6 @@ function formatPrice(value: unknown) {
   const n = Number(value);
   if (Number.isNaN(n)) return null;
   return `${n.toFixed(2)} $`;
-}
-
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat("fr-CA", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(date));
 }
 
 export function ProductPipelineList({ products }: { products: ListProduct[] }) {
@@ -97,30 +87,29 @@ export function ProductPipelineList({ products }: { products: ListProduct[] }) {
 
   if (products.length === 0) {
     return (
-      <div className="panel panel-glow flex flex-col items-center px-6 py-16 text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] text-2xl text-[var(--accent)]">
-          ◈
+      <div className="bento flex flex-col items-center px-6 py-20 text-center">
+        <div className="flex size-14 items-center justify-center rounded-full bg-[var(--accent)] text-lg font-bold text-white">
+          M
         </div>
         <h2 className="font-display mt-5 text-xl font-semibold">Pipeline vide</h2>
         <p className="mt-2 max-w-sm text-sm text-[var(--text-muted)]">
-          Ouvrez l&apos;extension Chrome sur une fiche maxx.ca et cliquez{" "}
-          <span className="text-[var(--accent)]">Sniper</span> pour démarrer.
+          Collez une URL Maxx dans Capture, ou utilisez l&apos;extension Chrome.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-4">
       {(publishableIds.length > 0 || selected.size > 0) && (
-        <div className="panel flex flex-wrap items-center gap-3 p-3">
+        <div className="bento flex flex-wrap items-center gap-3 p-3 sm:p-4">
           <span className="text-xs text-[var(--text-muted)]">
             {publishableIds.length} prêt(s) à publier
           </span>
           <button
             type="button"
             onClick={selectAllReady}
-            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+            className="rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)]"
           >
             Tout sélectionner
           </button>
@@ -128,7 +117,7 @@ export function ProductPipelineList({ products }: { products: ListProduct[] }) {
             <button
               type="button"
               onClick={clearSelection}
-              className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--text-muted)]"
+              className="rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-xs text-[var(--text-muted)]"
             >
               Effacer
             </button>
@@ -151,31 +140,22 @@ export function ProductPipelineList({ products }: { products: ListProduct[] }) {
         </div>
       )}
 
-      <div className="grid gap-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {products.map((product, index) => {
           const sell = formatPrice(product.suggestedPrice);
-          const cost = formatPrice(product.costPrice);
-          const margin =
-            product.suggestedPrice != null && product.costPrice != null
-              ? Math.round(
-                  ((Number(product.suggestedPrice) - Number(product.costPrice)) /
-                    Number(product.suggestedPrice)) *
-                    100
-                )
-              : null;
           const selectable =
             (product.status === "ready" || product.status === "error") &&
             !product.shopifyProductId;
 
           return (
-            <div
+            <article
               key={product.id}
-              className="panel panel-glow group flex gap-3 p-3 transition hover:border-[var(--border-strong)] sm:gap-4 sm:p-4"
+              className="bento group flex flex-col overflow-hidden transition hover:-translate-y-0.5"
               style={{ animationDelay: `${index * 40}ms` }}
             >
               <Link
                 href={`/products/${product.id}`}
-                className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-[var(--bg-elevated)] sm:h-28 sm:w-28"
+                className="relative aspect-square overflow-hidden bg-[var(--bg)]"
               >
                 {product.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -183,41 +163,26 @@ export function ProductPipelineList({ products }: { products: ListProduct[] }) {
                     src={product.imageUrl}
                     alt=""
                     referrerPolicy="no-referrer"
-                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                    className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
                   />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-xs text-[var(--text-faint)]">
-                    Aucune image
+                  <div className="flex h-full items-center justify-center text-sm text-[var(--text-faint)]">
+                    Pas d&apos;image
                   </div>
                 )}
+                <div className="absolute left-3 top-3">
+                  <StatusBadge status={product.status} />
+                </div>
               </Link>
 
-              <div className="min-w-0 flex-1 py-0.5">
-                <Link href={`/products/${product.id}`} className="block">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <h2 className="font-display line-clamp-2 text-base font-semibold tracking-tight sm:text-lg">
-                      {product.title ?? product.rawTitle ?? "Sans titre"}
-                    </h2>
-                    <StatusBadge status={product.status} />
-                  </div>
-                  <p className="mt-1 truncate text-xs text-[var(--text-faint)]">
-                    {product.sourceSite} · {formatDate(product.createdAt)}
-                    {product.lotQuantity > 1 ? ` · ×${product.lotQuantity}` : ""}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+              <div className="flex flex-1 flex-col gap-3 p-4">
+                <Link href={`/products/${product.id}`} className="min-w-0">
+                  <h2 className="font-display line-clamp-2 text-base font-semibold tracking-tight">
+                    {product.title ?? product.rawTitle ?? "Sans titre"}
+                  </h2>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                     {sell && (
-                      <span className="font-semibold text-[var(--accent)]">{sell}</span>
-                    )}
-                    {product.maxBidLot != null && (
-                      <span className="text-[var(--warning)]">
-                        Max bid {formatPrice(product.maxBidLot)}
-                      </span>
-                    )}
-                    {cost && (
-                      <span className="text-[var(--text-muted)]">Landed {cost}</span>
-                    )}
-                    {margin != null && (
-                      <span className="text-[var(--text-faint)]">Markup {margin}%</span>
+                      <span className="font-semibold">{sell}</span>
                     )}
                     <span className="capitalize text-[var(--text-faint)]">
                       {product.bidStatus}
@@ -226,32 +191,24 @@ export function ProductPipelineList({ products }: { products: ListProduct[] }) {
                       className={
                         (product.stockQty ?? 0) <= (product.lowStockThreshold ?? 1)
                           ? "text-[var(--danger)]"
-                          : "text-[var(--success)]"
+                          : "text-[var(--text-muted)]"
                       }
                     >
                       Stock {product.stockQty ?? 0}
                     </span>
-                    {product.assignedTo && (
-                      <span className="truncate text-[var(--text-faint)]">
-                        @{product.assignedTo.split("@")[0]}
-                      </span>
-                    )}
-                    {product.eventWeekKey && (
-                      <span className="hidden text-[var(--text-faint)] md:inline">
-                        {product.eventWeekKey.replace(/^maxx-/, "")}
-                      </span>
-                    )}
                   </div>
                 </Link>
-              </div>
 
-              <ProductRowActions
-                product={product}
-                selectable={selectable}
-                selected={selected.has(product.id)}
-                onToggleSelect={() => toggle(product.id)}
-              />
-            </div>
+                <div className="mt-auto border-t border-[var(--border)] pt-3">
+                  <ProductRowActions
+                    product={product}
+                    selectable={selectable}
+                    selected={selected.has(product.id)}
+                    onToggleSelect={() => toggle(product.id)}
+                  />
+                </div>
+              </div>
+            </article>
           );
         })}
       </div>
