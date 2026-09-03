@@ -36,8 +36,12 @@ export function buildStorefrontDescriptionHtml(input: {
 
   if (input.preWin) {
     const note =
-      "<p><em>Stock en approvisionnement — disponibilité sous réserve d’acquisition du lot.</em></p>";
-    if (!html.toLowerCase().includes("approvisionnement")) {
+      "<p><strong>Précommande sur demande</strong> — réservez dès maintenant. On n’achète le lot que s’il y a de l’intérêt ; sinon la commande est annulée et remboursée. Expédition après réception au entrepôt UNIT411.</p>";
+    if (
+      !html.toLowerCase().includes("sur demande") &&
+      !html.toLowerCase().includes("précommande") &&
+      !html.toLowerCase().includes("precommande")
+    ) {
       html = `${html}\n${note}`;
     }
   }

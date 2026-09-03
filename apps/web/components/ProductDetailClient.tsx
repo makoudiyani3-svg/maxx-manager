@@ -257,6 +257,32 @@ export function ProductDetailClient({ product }: { product: Product }) {
     }
   }
 
+  async function handleRemoveFromStore() {
+    if (
+      !product.shopifyProductId ||
+      !window.confirm(
+        "Supprimer ce produit de la boutique Shopify ? Il restera dans le War Room."
+      )
+    ) {
+      return;
+    }
+    setShopifyBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/products/${product.id}/shopify`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Suppression échouée");
+      setMessage("Produit retiré de la boutique Shopify");
+      router.refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Erreur suppression");
+    } finally {
+      setShopifyBusy(false);
+    }
+  }
+
   async function setBidStatus(status: string) {
     setMessage(null);
     try {
@@ -317,6 +343,9 @@ export function ProductDetailClient({ product }: { product: Product }) {
     product.bidStatus === "won" &&
     Boolean(product.shopifyProductId) &&
     !product.inventorySyncedAt;
+  const canPublish =
+    (product.status === "ready" || product.status === "error") &&
+    (!product.shopifyProductId || product.status === "error");
 
   return (
     <div className="fade-in space-y-6">
@@ -387,13 +416,27 @@ export function ProductDetailClient({ product }: { product: Product }) {
               Réactiver
             </button>
           )}
-          {product.status === "ready" && !product.shopifyProductId && (
+          {product.shopifyProductId && (
+            <button
+              type="button"
+              onClick={() => void handleRemoveFromStore()}
+              disabled={shopifyBusy}
+              className="btn btn-danger"
+            >
+              {shopifyBusy ? "…" : "Retirer de la boutique"}
+            </button>
+          )}
+          {canPublish && (
             <button
               onClick={handlePublish}
               disabled={publishing}
               className="btn btn-primary"
             >
-              {publishing ? "Publication…" : "Publier sur Shopify"}
+              {publishing
+                ? "Publication…"
+                : product.status === "error"
+                  ? "Réessayer publication"
+                  : "Publier sur Shopify"}
             </button>
           )}
         </div>
@@ -484,13 +527,17 @@ export function ProductDetailClient({ product }: { product: Product }) {
               {s}
             </button>
           ))}
-          {product.status === "ready" && !product.shopifyProductId && (
+          {canPublish && (
             <button
               onClick={() => void handlePublish()}
               disabled={publishing}
               className="btn btn-primary text-xs"
             >
-              {publishing ? "…" : "Publier"}
+              {publishing
+                ? "…"
+                : product.status === "error"
+                  ? "Réessayer"
+                  : "Publier"}
             </button>
           )}
           {needsStock && (

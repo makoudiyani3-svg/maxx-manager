@@ -94,6 +94,31 @@ export function ProductRowActions({
     }
   }
 
+  async function removeFromStore() {
+    if (
+      !product.shopifyProductId ||
+      !window.confirm(
+        "Supprimer ce produit de la boutique Shopify ? Il restera dans le War Room."
+      )
+    ) {
+      return;
+    }
+    setBusy("delete");
+    try {
+      const res = await fetch(`/api/products/${product.id}/shopify`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Suppression échouée");
+      setMsg("Retiré de la boutique");
+      startTransition(() => router.refresh());
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Erreur suppression");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const adminUrl = product.shopifyProductId
     ? shopifyAdminUrl(product.shopifyProductId)
     : null;
@@ -102,7 +127,8 @@ export function ProductRowActions({
     Boolean(product.shopifyProductId) &&
     !product.inventorySyncedAt;
   const canPublish =
-    product.status === "ready" && !product.shopifyProductId;
+    (product.status === "ready" || product.status === "error") &&
+    (!product.shopifyProductId || product.status === "error");
 
   const disabled = Boolean(busy) || pending;
 
@@ -189,6 +215,16 @@ export function ProductRowActions({
             className="rounded-full bg-[var(--accent)] px-3 py-1 text-[0.65rem] font-bold text-white"
           >
             {busy === "stock" ? "…" : "Activer stock"}
+          </button>
+        )}
+        {product.shopifyProductId && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => void removeFromStore()}
+            className="rounded-full border border-[rgba(229,72,77,0.35)] px-3 py-1 text-[0.65rem] font-bold text-[var(--danger)] hover:bg-[rgba(229,72,77,0.08)]"
+          >
+            {busy === "delete" ? "…" : "Retirer boutique"}
           </button>
         )}
       </div>

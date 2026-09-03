@@ -53,7 +53,7 @@ export async function POST(
     );
   }
 
-  if (product.shopifyProductId) {
+  if (product.shopifyProductId && product.status !== "error") {
     return Response.json(
       {
         error: "Product already published",

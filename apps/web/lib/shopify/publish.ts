@@ -102,7 +102,7 @@ const PRODUCT_MEDIA_STATUS = `
 
 const PUBLICATIONS = `
   query publications {
-    publications(first: 10) {
+    publications(first: 25) {
       nodes {
         id
         name
@@ -188,7 +188,10 @@ function generateSku(productId: string): string {
   return `MAXX-${productId.slice(0, 8).toUpperCase()}`;
 }
 
-async function waitForMediaReady(shopifyProductId: string, maxWaitMs = 30000): Promise<void> {
+async function waitForMediaReady(
+  shopifyProductId: string,
+  maxWaitMs = 30000
+): Promise<{ ready: number; failed: number }> {
   const client = getShopifyClient();
   const start = Date.now();
 
@@ -202,28 +205,43 @@ async function waitForMediaReady(shopifyProductId: string, maxWaitMs = 30000): P
     }>(PRODUCT_MEDIA_STATUS, { id: shopifyProductId });
 
     const media = data.product?.media.nodes ?? [];
-    if (media.length === 0) return;
+    if (media.length === 0) return { ready: 0, failed: 0 };
 
-    const allReady = media.every((m) => m.status === "READY");
-    const anyFailed = media.some((m) => m.status === "FAILED");
+    const ready = media.filter((m) => m.status === "READY").length;
+    const failed = media.filter((m) => m.status === "FAILED").length;
+    const pending = media.length - ready - failed;
 
-    if (anyFailed) {
-      throw new Error("One or more product images failed to import on Shopify");
+    // Done when nothing left processing — partial failures OK
+    if (pending === 0) return { ready, failed };
+    if (ready > 0 && Date.now() - start > 12000) {
+      // Enough images live; don't block publish on slow/failed leftovers
+      return { ready, failed };
     }
-    if (allReady) return;
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
-  throw new Error("Timed out waiting for Shopify media to be ready");
+  const final = await client.query<{
+    product: { media: { nodes: Array<{ status: string }> } } | null;
+  }>(PRODUCT_MEDIA_STATUS, { id: shopifyProductId });
+  const nodes = final.product?.media.nodes ?? [];
+  return {
+    ready: nodes.filter((m) => m.status === "READY").length,
+    failed: nodes.filter((m) => m.status === "FAILED").length,
+  };
 }
 
-async function countShopifyMedia(shopifyProductId: string): Promise<number> {
+async function countShopifyMedia(
+  shopifyProductId: string,
+  onlyReady = false
+): Promise<number> {
   const client = getShopifyClient();
   const data = await client.query<{
     product: { media: { nodes: Array<{ status: string }> } } | null;
   }>(PRODUCT_MEDIA_STATUS, { id: shopifyProductId });
-  return data.product?.media.nodes.length ?? 0;
+  const nodes = data.product?.media.nodes ?? [];
+  if (onlyReady) return nodes.filter((m) => m.status === "READY").length;
+  return nodes.length;
 }
 
 export interface PublishResult {
@@ -241,13 +259,15 @@ export async function publishProductToShopify(
 ): Promise<PublishResult> {
   const client = getShopifyClient();
   const isFirstCreate = !product.shopifyProductId;
+  // Annonce avant achat Maxx = vendable en précommande (stock 0 OK)
+  const isComingSoon = product.bidStatus !== "won";
 
   const descriptionHtml = buildStorefrontDescriptionHtml({
     descriptionHtml: product.descriptionHtml,
     bulletPoints: product.bulletPoints,
     rawDescription: product.rawDescription,
     title: product.title ?? product.rawTitle,
-    preWin: product.bidStatus !== "won",
+    preWin: isComingSoon,
   });
 
   const vendor = inferVendor(product);
@@ -256,6 +276,9 @@ export async function publishProductToShopify(
     ...new Set([
       ...product.tags,
       "maxx-pre-win",
+      ...(isComingSoon
+        ? ["précommande", "sur-demande", "maxx-interest"]
+        : []),
       ...(product.eventWeekKey ? [`event:${product.eventWeekKey}`] : []),
       ...(vendor && vendor !== "UNIT411" ? [`brand:${vendor}`] : []),
     ]),
@@ -357,6 +380,9 @@ export async function publishProductToShopify(
       ? Number(product.costPrice).toFixed(2)
       : undefined;
 
+  // Stock 0 + CONTINUE = achetable dès l’annonce (arrivage semaine prochaine)
+  const inventoryPolicy = isComingSoon ? "CONTINUE" : "DENY";
+
   let shopifyVariantId = product.shopifyVariantId;
   let shopifyInventoryItemId = product.shopifyInventoryItemId;
 
@@ -364,7 +390,7 @@ export async function publishProductToShopify(
     const variantInput: Record<string, unknown> = {
       price,
       ...(compareAtPrice ? { compareAtPrice } : {}),
-      inventoryPolicy: "DENY",
+      inventoryPolicy,
       inventoryItem: {
         sku,
         tracked: true,
@@ -444,8 +470,8 @@ export async function publishProductToShopify(
     }
   }
 
-  // Refresh price / compare-at when variant already existed
-  if (shopifyVariantId && product.shopifyProductId) {
+  // Prix + politique inventaire (précommande) — toujours à jour sur publish
+  if (shopifyVariantId) {
     try {
       await client.query(VARIANTS_BULK_UPDATE, {
         productId: shopifyProductId,
@@ -453,12 +479,13 @@ export async function publishProductToShopify(
           {
             id: shopifyVariantId,
             price,
+            inventoryPolicy,
             ...(compareAtPrice ? { compareAtPrice } : {}),
           },
         ],
       });
     } catch (err) {
-      console.warn("Could not update variant price/compare-at:", err);
+      console.warn("Could not update variant price/inventoryPolicy:", err);
     }
   }
 
@@ -466,62 +493,85 @@ export async function publishProductToShopify(
     input: { id: shopifyProductId, status: "ACTIVE" },
   });
 
-  const existingMediaCount = isFirstCreate
+  const existingReadyMedia = isFirstCreate
     ? 0
-    : await countShopifyMedia(shopifyProductId).catch(() => 0);
+    : await countShopifyMedia(shopifyProductId, true).catch(() => 0);
 
-  if (selectedImages.length > 0 && (isFirstCreate || existingMediaCount === 0)) {
-    const mediaData = await client.query<{
-      productCreateMedia: {
-        mediaUserErrors: Array<{ message: string }>;
-      };
-    }>(PRODUCT_CREATE_MEDIA, {
-      productId: shopifyProductId,
-      media: selectedImages.map((img, index) => ({
-        mediaContentType: "IMAGE",
-        originalSource: img.url,
-        alt: `${product.title ?? product.rawTitle}${
-          img.source === "maxx" ? " (lot Maxx)" : ""
-        } - Image ${index + 1}`,
-      })),
-    });
+  if (selectedImages.length > 0 && (isFirstCreate || existingReadyMedia === 0)) {
+    try {
+      // Prefer non-Maxx URLs first (fabricant) — Maxx hotlinks often fail Shopify fetch
+      const ordered = [...selectedImages].sort((a, b) => {
+        const aMaxx = a.source === "maxx" ? 1 : 0;
+        const bMaxx = b.source === "maxx" ? 1 : 0;
+        return aMaxx - bMaxx;
+      });
 
-    if (mediaData.productCreateMedia.mediaUserErrors.length > 0) {
-      throw new Error(
-        mediaData.productCreateMedia.mediaUserErrors
-          .map((e) => e.message)
-          .join(", ")
-      );
+      const mediaData = await client.query<{
+        productCreateMedia: {
+          mediaUserErrors: Array<{ message: string }>;
+        };
+      }>(PRODUCT_CREATE_MEDIA, {
+        productId: shopifyProductId,
+        media: ordered.map((img, index) => ({
+          mediaContentType: "IMAGE",
+          originalSource: img.url,
+          alt: `${product.title ?? product.rawTitle}${
+            img.source === "maxx" ? " (lot Maxx)" : ""
+          } - Image ${index + 1}`,
+        })),
+      });
+
+      if (mediaData.productCreateMedia.mediaUserErrors.length > 0) {
+        console.warn(
+          "Shopify media userErrors (continuing publish):",
+          mediaData.productCreateMedia.mediaUserErrors
+            .map((e) => e.message)
+            .join(", ")
+        );
+      }
+
+      const mediaResult = await waitForMediaReady(shopifyProductId);
+      if (mediaResult.failed > 0) {
+        console.warn(
+          `Shopify media: ${mediaResult.ready} ready, ${mediaResult.failed} failed — publish continues`
+        );
+      }
+    } catch (err) {
+      // Never block storefront publish on image import
+      console.warn("Shopify media import soft-fail:", err);
     }
-
-    await waitForMediaReady(shopifyProductId);
   }
 
   const pubsData = await client.query<{
     publications: { nodes: Array<{ id: string; name: string }> };
   }>(PUBLICATIONS);
 
-  const onlineStore = pubsData.publications.nodes.find(
-    (p) => p.name === "Online Store" || p.name.includes("Online")
+  const publications = pubsData.publications.nodes;
+  if (publications.length === 0) {
+    throw new Error(
+      "Aucune publication Shopify trouvée. Vérifie les scopes read_publications / write_publications."
+    );
+  }
+
+  // Priorité boutique en ligne ; sinon tous les canaux
+  const onlineLike = publications.filter((p) =>
+    /online\s*store|boutique\s*en\s*ligne|\bonline\b/i.test(p.name)
   );
+  const targets = onlineLike.length > 0 ? onlineLike : publications;
 
-  if (onlineStore) {
-    const publishData = await client.query<{
-      publishablePublish: {
-        userErrors: Array<{ message: string }>;
-      };
-    }>(PUBLISHABLE_PUBLISH, {
-      id: shopifyProductId,
-      input: [{ publicationId: onlineStore.id }],
-    });
+  const publishData = await client.query<{
+    publishablePublish: {
+      userErrors: Array<{ message: string }>;
+    };
+  }>(PUBLISHABLE_PUBLISH, {
+    id: shopifyProductId,
+    input: targets.map((p) => ({ publicationId: p.id })),
+  });
 
-    if (publishData.publishablePublish.userErrors.length > 0) {
-      throw new Error(
-        publishData.publishablePublish.userErrors
-          .map((e) => e.message)
-          .join(", ")
-      );
-    }
+  if (publishData.publishablePublish.userErrors.length > 0) {
+    throw new Error(
+      publishData.publishablePublish.userErrors.map((e) => e.message).join(", ")
+    );
   }
 
   return {

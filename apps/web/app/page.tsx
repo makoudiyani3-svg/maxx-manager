@@ -1,21 +1,10 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { STATUS_FILTERS } from "@/components/StatusBadge";
 import { WarRoomHeader } from "@/components/WarRoomHeader";
 import { ProductPipelineList } from "@/components/ProductPipelineList";
 import type { ProductStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
-
-const BID_FILTERS = [
-  { value: "", label: "Toutes", key: "bid-all" },
-  { value: "watching", label: "Watching", key: "watching" },
-  { value: "capped", label: "Capped", key: "capped" },
-  { value: "published", label: "Publiés", key: "published" },
-  { value: "won", label: "Won", key: "won" },
-  { value: "lost", label: "Lost", key: "lost" },
-  { value: "skipped", label: "Skipped", key: "skipped" },
-];
 
 export default async function DashboardPage({
   searchParams,
@@ -25,14 +14,17 @@ export default async function DashboardPage({
     event?: string;
     bid?: string;
     alert?: string;
+    store?: string;
   }>;
 }) {
-  const { status, event, bid, alert } = await searchParams;
+  const { status, event, bid, alert, store } = await searchParams;
   const filterStatus = status as ProductStatus | undefined;
   const alertFocus =
     alert === "low" || alert === "unassigned" || alert === "oversold"
       ? alert
       : null;
+  const storeFilter =
+    store === "published" || store === "unpublished" ? store : null;
 
   const where = {
     ...(filterStatus ? { status: filterStatus } : {}),
@@ -40,43 +32,47 @@ export default async function DashboardPage({
     ...(bid ? { bidStatus: bid } : {}),
   };
 
-  const [products, counts, total, eventGroups, bidCounts, inventoryAgg] =
-    await Promise.all([
-      prisma.product.findMany({
-        where,
-        include: {
-          images: {
-            where: { isSelected: true },
-            orderBy: { position: "asc" },
-            take: 1,
-          },
+  const [products, total, eventGroups, inventoryAgg] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      include: {
+        images: {
+          where: { isSelected: true },
+          orderBy: { position: "asc" },
+          take: 1,
         },
-        orderBy: [{ auctionEndsAt: "asc" }, { createdAt: "desc" }],
-      }),
-      prisma.product.groupBy({ by: ["status"], _count: true }),
-      prisma.product.count(),
-      prisma.product.groupBy({
-        by: ["eventWeekKey"],
-        _count: true,
-        where: { eventWeekKey: { not: null } },
-        orderBy: { _count: { eventWeekKey: "desc" } },
-        take: 12,
-      }),
-      prisma.product.groupBy({ by: ["bidStatus"], _count: true }),
-      prisma.product.findMany({
-        select: {
-          stockQty: true,
-          lowStockThreshold: true,
-          assignedTo: true,
-          status: true,
-          bidStatus: true,
-        },
-      }),
-    ]);
+      },
+      orderBy: [{ auctionEndsAt: "asc" }, { createdAt: "desc" }],
+    }),
+    prisma.product.count(),
+    prisma.product.groupBy({
+      by: ["eventWeekKey"],
+      _count: true,
+      where: { eventWeekKey: { not: null } },
+      orderBy: { _count: { eventWeekKey: "desc" } },
+      take: 20,
+    }),
+    prisma.product.findMany({
+      select: {
+        stockQty: true,
+        lowStockThreshold: true,
+        assignedTo: true,
+        status: true,
+        bidStatus: true,
+        shopifyProductId: true,
+      },
+    }),
+  ]);
 
-  const countMap = Object.fromEntries(counts.map((c) => [c.status, c._count]));
-  const bidCountMap = Object.fromEntries(
-    bidCounts.map((c) => [c.bidStatus, c._count])
+  const eventNames = await prisma.product.findMany({
+    where: { eventWeekKey: { not: null }, eventName: { not: null } },
+    select: { eventWeekKey: true, eventName: true },
+    distinct: ["eventWeekKey"],
+  });
+  const eventNameByKey = Object.fromEntries(
+    eventNames
+      .filter((e) => e.eventWeekKey && e.eventName)
+      .map((e) => [e.eventWeekKey!, e.eventName!])
   );
 
   const activeEventKey =
@@ -135,6 +131,7 @@ export default async function DashboardPage({
     suggestedPrice: p.suggestedPrice != null ? Number(p.suggestedPrice) : null,
     costPrice: p.costPrice != null ? Number(p.costPrice) : null,
     eventWeekKey: p.eventWeekKey,
+    eventName: p.eventName,
     sourceSite: p.sourceSite,
     createdAt: p.createdAt.toISOString(),
     imageUrl: p.images[0]?.url ?? null,
@@ -155,6 +152,21 @@ export default async function DashboardPage({
       (p) => !p.assignedTo && (p.status === "ready" || p.status === "active")
     );
   }
+
+  if (storeFilter === "published") {
+    listProducts = listProducts.filter(
+      (p) => Boolean(p.shopifyProductId) || p.bidStatus === "published"
+    );
+  } else if (storeFilter === "unpublished") {
+    listProducts = listProducts.filter(
+      (p) => !p.shopifyProductId && p.bidStatus !== "published"
+    );
+  }
+
+  const publishedCount = inventoryAgg.filter(
+    (p) => Boolean(p.shopifyProductId) || p.bidStatus === "published"
+  ).length;
+  const unpublishedCount = inventoryAgg.length - publishedCount;
 
   const featuredSource =
     listProducts.find((p) => p.status === "ready" && p.imageUrl) ??
@@ -183,6 +195,7 @@ export default async function DashboardPage({
       event,
       bid,
       alert: alertFocus ?? undefined,
+      store: storeFilter ?? undefined,
       ...params,
     };
     for (const [k, v] of Object.entries(merged)) {
@@ -191,25 +204,6 @@ export default async function DashboardPage({
     const q = sp.toString();
     return q ? `/?${q}` : "/";
   }
-
-  const pipelineItems = [
-    {
-      label: "Tous",
-      href: hrefWith({ status: undefined, bid: undefined, alert: undefined }),
-      count: total,
-      active: !filterStatus && !bid && !alertFocus,
-    },
-    ...STATUS_FILTERS.filter((f) => f.value).map((filter) => ({
-      label: filter.label,
-      href: hrefWith({
-        status: filter.value || undefined,
-        bid: undefined,
-        alert: undefined,
-      }),
-      count: countMap[filter.value as ProductStatus] ?? 0,
-      active: (filterStatus ?? "") === filter.value,
-    })),
-  ];
 
   return (
     <div className="fade-in flex flex-col gap-6">
@@ -243,102 +237,87 @@ export default async function DashboardPage({
       />
 
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
-        {/* Pipeline rail — Maisone "Rooms" style */}
         <aside className="bento flex flex-col gap-2 p-3">
           <p className="px-3 pb-1 pt-2 text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-            Statuts
+            Semaines
           </p>
-          {pipelineItems.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-medium transition ${
-                item.active
-                  ? "bg-[var(--accent)] text-white"
-                  : "text-[var(--text-muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]"
-              }`}
-            >
-              <span>{item.label}</span>
-              <span className={item.active ? "opacity-70" : "opacity-50"}>
-                {item.count}
-              </span>
-            </Link>
-          ))}
-
-          <p className="px-3 pb-1 pt-4 text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-            Enchères
-          </p>
-          {BID_FILTERS.map((filter) => {
-            const count =
-              filter.value === "" ? total : (bidCountMap[filter.value] ?? 0);
-            const isActive = (bid ?? "") === filter.value;
+          <Link
+            href={hrefWith({ event: undefined })}
+            className={`flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-medium transition ${
+              !event
+                ? "bg-[var(--accent)] text-white"
+                : "text-[var(--text-muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]"
+            }`}
+          >
+            <span>Toutes</span>
+            <span className={!event ? "opacity-70" : "opacity-50"}>{total}</span>
+          </Link>
+          {eventGroups.map((g) => {
+            const key = g.eventWeekKey!;
+            const isActive = event === key;
+            const label =
+              eventNameByKey[key]?.trim() || key.replace(/^maxx-/, "");
             return (
               <Link
-                key={filter.key}
-                href={hrefWith({
-                  bid: filter.value || undefined,
-                  alert: undefined,
-                })}
+                key={key}
+                href={hrefWith({ event: key })}
                 className={`flex items-center justify-between rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
                   isActive
                     ? "bg-[var(--accent)] text-white"
                     : "text-[var(--text-muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]"
                 }`}
               >
-                <span>{filter.label}</span>
+                <span className="truncate">{label}</span>
                 <span className={isActive ? "opacity-70" : "opacity-50"}>
-                  {count}
+                  {g._count}
                 </span>
               </Link>
             );
           })}
 
-          {eventGroups.length > 0 && (
-            <>
-              <p className="px-3 pb-1 pt-4 text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-                Events
-              </p>
-              {eventGroups.map((g) => {
-                const key = g.eventWeekKey!;
-                const isActive =
-                  event === key || (!event && key === activeEventKey);
-                return (
-                  <Link
-                    key={key}
-                    href={hrefWith({ event: key })}
-                    className={`flex items-center justify-between rounded-2xl px-4 py-2.5 text-xs font-medium transition ${
-                      isActive
-                        ? "bg-[var(--accent)] text-white"
-                        : "text-[var(--text-muted)] hover:bg-[var(--bg)]"
-                    }`}
-                  >
-                    <span className="truncate">{key.replace(/^maxx-/, "")}</span>
-                    <span className="opacity-60">{g._count}</span>
-                  </Link>
-                );
-              })}
-            </>
-          )}
+          <p className="px-3 pb-1 pt-4 text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+            Boutique
+          </p>
+          {(
+            [
+              { value: undefined, label: "Tous", count: total },
+              {
+                value: "published" as const,
+                label: "Publiés",
+                count: publishedCount,
+              },
+              {
+                value: "unpublished" as const,
+                label: "Non publiés",
+                count: unpublishedCount,
+              },
+            ] as const
+          ).map((item) => {
+            const isActive = (storeFilter ?? undefined) === item.value;
+            return (
+              <Link
+                key={item.label}
+                href={hrefWith({ store: item.value })}
+                className={`flex items-center justify-between rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
+                  isActive
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--text-muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                }`}
+              >
+                <span>{item.label}</span>
+                <span className={isActive ? "opacity-70" : "opacity-50"}>
+                  {item.count}
+                </span>
+              </Link>
+            );
+          })}
 
-          <Link
-            href="/?status=ready"
-            className="btn btn-primary mt-3 w-full"
-          >
-            Publier les prêts
+          <Link href="/?store=unpublished" className="btn btn-primary mt-3 w-full">
+            Voir non publiés
           </Link>
         </aside>
 
         <div className="min-w-0">
-          <div className="mb-4 flex items-end justify-between gap-3">
-            <div>
-              <p className="text-[0.65rem] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-                Collection
-              </p>
-              <h2 className="font-display text-2xl font-bold tracking-tight">
-                {listProducts.length} produit{listProducts.length === 1 ? "" : "s"}
-              </h2>
-            </div>
-          </div>
           <ProductPipelineList products={listProducts} />
         </div>
       </div>
